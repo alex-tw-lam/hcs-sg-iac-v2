@@ -2,6 +2,14 @@
 
 Semantic versioning; pre-1.0 minors carry breaking changes.
 
+## v0.2.1 — 2026-08-20
+- Real-cloud contract suite gains CTRCT-03: the 2-call inventory must
+  agree with the per-SG protocol reads on the same cloud (SG set,
+  sampled rules, membership, NIC index) — run with
+  `pytest -m cloud_contract` and HCS_* credentials.
+- FakeGateway implements the inventory() fast path (contract parity);
+  read-path test stubs retargeted to the path the CLI actually takes.
+
 ## v0.2.0 — 2026-08-20 — BREAKING
 
 ### Breaking
