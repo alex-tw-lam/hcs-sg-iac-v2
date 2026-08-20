@@ -1323,6 +1323,12 @@ DEFERRED: dict = {
 # Tier 4 stays hand-written under the cloud_contract marker
 # (tests/contract/test_gateway_contract.py); ids map to dedicated tests.
 TIER4: dict = {
-    "CTRCT-01": "full protocol exercise, fake always + real gated",
+    "CTRCT-01": "full protocol exercise, fake always + real gated; rule "
+                "assertions are id-filtered because real HCS auto-adds "
+                "self-referential rules on create",
     "CTRCT-02": "extended protocol round-trip: udp, icmp type/code, all",
+    "CTRCT-03": "2-call inventory must agree with per-SG reads, same cloud",
+    "CTRCT-04": "member bind/unbind round trip (append/remove-one on the "
+                "port's SG list); real cloud needs HCS_CONTRACT_PORT, "
+                "otherwise skipped",
 }

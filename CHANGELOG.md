@@ -2,6 +2,17 @@
 
 Semantic versioning; pre-1.0 minors carry breaking changes.
 
+## Unreleased
+- First real-cloud contract run (HCS 8.5.1): CTRCT-03 (inventory parity)
+  PASSED — the 2-call snapshot path is validated against per-SG reads on
+  the live cloud. Two test bugs fixed, no production change:
+  - creating an SG on real HCS auto-adds self-referential rules, so
+    CTRCT-01/02 now assert by created id instead of exact rule counts;
+  - the member bind/unbind exercise moved to CTRCT-04: the fake always
+    runs it, the real cloud needs `HCS_CONTRACT_PORT` (a spare test port
+    id) and skips otherwise (it previously assumed the fake's "port-1"
+    exists on the live cloud).
+
 ## v0.2.1 — 2026-08-20
 - Real-cloud contract suite gains CTRCT-03: the 2-call inventory must
   agree with the per-SG protocol reads on the same cloud (SG set,

@@ -166,11 +166,20 @@ clear-all warning precision; credentials gate (names all four vars);
 env config family; audit.jsonl; default/nonexistent project; duplicate
 cloud names clean error; post-execute quota freshness.
 
-### T4 cloud-contract (CTRCT-01…02)
+### T4 cloud-contract (CTRCT-01…04)
 
-CTRCT-01 full protocol exercise (fake always, real gated, cleanup-safe).
+CTRCT-01 full protocol exercise (fake always, real gated, cleanup-safe);
+rule assertions match by created id, never by count — real HCS auto-adds
+self-referential rules on create.
 CTRCT-02 extended protocol round-trip (udp, icmp type/code on the wire,
-all) — real cloud only meaningful additions.
+all).
+CTRCT-03 the 2-call whole-cloud inventory must agree with the per-SG
+protocol reads on the same cloud (SG set, rules, membership, NIC index;
+slow path sampled to 5 SGs).
+CTRCT-04 member bind/unbind round trip via the update-port pattern
+(attach appends, detach removes only ours). The fake always runs it; the
+real cloud needs `HCS_CONTRACT_PORT` (a spare test port id) and skips
+otherwise.
 
 ## 5. Coverage
 
