@@ -7,7 +7,12 @@ import re
 from dataclasses import dataclass
 from typing import cast
 
-from hcs_sg_iac.model.common import Remote, Report, parse_remote
+from hcs_sg_iac.model.common import (
+    Remote,
+    Report,
+    looks_like_ip,
+    parse_remote,
+)
 from hcs_sg_iac.model.portset import PortError, PortSet, parse_ports
 
 GROUP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -59,17 +64,6 @@ class DesiredState:
     rules: dict  # name -> RulesFile (only groups WITH a rules file)
 
 
-def _looks_like_ip(name: str) -> bool:
-    try:
-        if "/" in name:
-            ipaddress.ip_network(name, strict=False)
-        else:
-            ipaddress.ip_address(name)
-        return True
-    except ValueError:
-        return False
-
-
 def parse_group(d, where: str, report: Report) -> Group | None:
     """Parse one groups/<name>.yaml document (a plain dict)."""
     if not isinstance(d, dict):
@@ -79,7 +73,7 @@ def parse_group(d, where: str, report: Report) -> Group | None:
     if not isinstance(name, str):
         report.error(where, f"name must be a string, got {name!r}")
         name = None
-    elif _looks_like_ip(name):
+    elif looks_like_ip(name):
         report.error(where, f"name {name!r} must not look like an IP/CIDR")
         name = None
     elif not GROUP_NAME_RE.fullmatch(name):
@@ -142,80 +136,13 @@ def parse_group(d, where: str, report: Report) -> Group | None:
     )
 
 
-def _parse_rule_items(
-    raw,
-    where: str,
-    report: Report,
-    label: str,
-    direction: str,
-    remote_key: str,
-):
-    """Parse ONE list of rule mappings (shared by the flat rules file
-    and the per-direction files). Returns (rules, ok)."""
-    rules, seen, ok = [], set(), True
-    for i, rd in enumerate(raw):
-        rwhere = f"{where}: {label}[{i}]"
-        if not isinstance(rd, dict):
-            report.error(rwhere, "rule must be a mapping")
-            ok = False
-            continue
-        remote_raw = rd.get(remote_key)
-        if not isinstance(remote_raw, str) or not remote_raw:
-            report.error(
-                rwhere, f"{remote_key} is required (group name or CIDR)"
-            )
-            ok = False
-            continue
-        try:
-            remote = parse_remote(remote_raw)
-        except ValueError:
-            report.error(
-                rwhere, f"{remote_key} {remote_raw!r} is not a valid CIDR"
-            )
-            ok = False
-            continue
-        protocol = rd.get("protocol")
-        if protocol not in PROTOCOLS:
-            report.error(
-                rwhere,
-                f"protocol must be one of {PROTOCOLS}, got {protocol!r}",
-            )
-            ok = False
-            continue
-        ports_raw = rd.get("ports")
-        if protocol in _NO_PORTS_PROTOCOLS and ports_raw not in (None, "", []):
-            report.error(rwhere, f"{protocol} rules must not have ports")
-            ok = False
-            continue
-        try:
-            ports = parse_ports(ports_raw, field="ports")
-        except PortError as e:
-            report.error(rwhere, str(e))
-            ok = False
-            continue
-        rule = Rule(
-            direction=direction, protocol=protocol, ports=ports, remote=remote
-        )
-        if rule.identity() in seen:
-            report.error(
-                rwhere,
-                f"duplicate {direction} rule "
-                f"(protocol={protocol}, ports={ports}, "
-                f"{remote_key}={remote_raw})",
-            )
-            ok = False
-            continue
-        seen.add(rule.identity())
-        rules.append(rule)
-    return tuple(rules), ok
-
-
 def parse_rule_list(
     raw, where: str, report: Report, direction: str, remote_key: str
 ) -> tuple:
-    """Parse a bare list of rules — the per-direction file layout
-    (security-groups/<name>/ingress|egress.yaml). An empty/null document
-    is the remove-all guidance error ([] is the explicit empty list)."""
+    """Parse one direction file (security-groups/<name>/<direction>.yaml)
+    — a bare list of rule mappings. An empty/null document is the
+    remove-all guidance error ([] is the explicit empty list); every
+    violation is collected, none fail fast."""
     if raw is None:
         report.error(
             where,
@@ -227,6 +154,52 @@ def parse_rule_list(
     if not isinstance(raw, list):
         report.error(where, f"{direction} file must be a list of rules")
         return ()
-    return _parse_rule_items(
-        raw, where, report, direction, direction, remote_key
-    )[0]
+    rules, seen = [], set()
+    for i, rd in enumerate(raw):
+        rwhere = f"{where}: {direction}[{i}]"
+        if not isinstance(rd, dict):
+            report.error(rwhere, "rule must be a mapping")
+            continue
+        remote_raw = rd.get(remote_key)
+        if not isinstance(remote_raw, str) or not remote_raw:
+            report.error(
+                rwhere, f"{remote_key} is required (group name or CIDR)"
+            )
+            continue
+        try:
+            remote = parse_remote(remote_raw)
+        except ValueError:
+            report.error(
+                rwhere, f"{remote_key} {remote_raw!r} is not a valid CIDR"
+            )
+            continue
+        protocol = rd.get("protocol")
+        if protocol not in PROTOCOLS:
+            report.error(
+                rwhere,
+                f"protocol must be one of {PROTOCOLS}, got {protocol!r}",
+            )
+            continue
+        ports_raw = rd.get("ports")
+        if protocol in _NO_PORTS_PROTOCOLS and ports_raw not in (None, "", []):
+            report.error(rwhere, f"{protocol} rules must not have ports")
+            continue
+        try:
+            ports = parse_ports(ports_raw, field="ports")
+        except PortError as e:
+            report.error(rwhere, str(e))
+            continue
+        rule = Rule(
+            direction=direction, protocol=protocol, ports=ports, remote=remote
+        )
+        if rule.identity() in seen:
+            report.error(
+                rwhere,
+                f"duplicate {direction} rule "
+                f"(protocol={protocol}, ports={ports}, "
+                f"{remote_key}={remote_raw})",
+            )
+            continue
+        seen.add(rule.identity())
+        rules.append(rule)
+    return tuple(rules)

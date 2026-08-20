@@ -38,14 +38,53 @@ def seed(gw, sgs=(), rules=(), nics=(("10.0.1.10", "p1"),), attached=()):
     return gw
 
 
-def run(argv, gw, capsys, monkeypatch):
-    """argv -> (rc, stdout, stderr); any stray prompt fails loudly."""
+def run(argv, gw, capsys, monkeypatch, sleeps=None):
+    """argv -> (rc, stdout, stderr); any stray prompt fails loudly.
+    `sleeps` (a list) captures time.sleep calls instead of sleeping."""
     monkeypatch.setattr(
         "builtins.input", lambda *_: pytest.fail("unexpected prompt")
     )
+    if sleeps is not None:
+        monkeypatch.setattr("time.sleep", sleeps.append)
     rc = main(list(argv), gateway=gw)
     captured = capsys.readouterr()
     return rc, captured.out, captured.err
+
+
+def cloud_rule(**kw):
+    base = {
+        "id": "r1",
+        "sg_id": "sg-web",
+        "direction": "ingress",
+        "protocol": "tcp",
+        "ports": "22",
+        "remote_group_id": None,
+        "remote_ip_prefix": "203.0.113.0/24",
+    }
+    base.update(kw)
+    return base
+
+
+def write_snapshot(
+    project, sgs=(), rules=None, attached=None, nics_by_ip=None
+):
+    import json as _json
+
+    snap = {
+        "sgs": [
+            {
+                "id": s[0],
+                "name": s[1],
+                "description": s[2] if len(s) > 2 else "",
+            }
+            for s in sgs
+        ],
+        "rules": rules or {},
+        "attached": attached or {},
+        "nics_by_ip": nics_by_ip or {},
+    }
+    (project / "snapshot.json").write_text(_json.dumps(snap))
+    return snap
 
 
 def plan_state(gw, state):

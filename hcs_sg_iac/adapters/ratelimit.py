@@ -62,7 +62,6 @@ class FixedWindowLimiter:
     def snapshot(self) -> Quota:
         self._rollover()
         return Quota(
-            service_budget_calls=self._budget,
             used_calls=self._used,
             effective_limit=self.limit,
             window_resets_at=self._window_start + self._window,

@@ -37,14 +37,6 @@ def _state(root):
     return state
 
 
-def test_budget_zero_throttles_the_rest(tmp_path):
-    gw = seed(FakeGateway())
-    gw.budget = 0
-    al = plan_state(gw, _state(_project(tmp_path)))
-    results = execute(al, sg_writer=gw, rule_writer=gw, binder=gw)
-    assert all(r.status == "throttled" for r in results)
-
-
 def test_wait_and_continue_write_side(tmp_path):
     """Exhaustion with a retry deadline: the executor sleeps once, then
     finishes — the whole point of wait-and-continue."""
@@ -85,8 +77,10 @@ def test_wait_and_continue_read_side(tmp_path):
     root = _project(tmp_path)
     gw = seed(ExhaustReadsOnce(delay=30.0))
     slept = []
+    from hcs_sg_iac.adapters import yaml_config
+
     al, errors = pipeline.plan_project(
-        lambda _r: (_state(_project(tmp_path)), _ok()),
+        yaml_config.load_project,
         gw,
         root,
         sleep=slept.append,
@@ -94,15 +88,6 @@ def test_wait_and_continue_read_side(tmp_path):
     )
     assert al is not None, errors
     assert len(slept) == 1
-
-
-class _Ok:
-    def ok(self):
-        return True
-
-
-def _ok():  # a Report stand-in the loader lambda can return
-    return _Ok()
 
 
 def test_throttle_then_resume_completes_remainder(tmp_path):

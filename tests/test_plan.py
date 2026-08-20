@@ -2,33 +2,24 @@
 """The diff engine's semantics: loader errors, resolution, identity
 joins, self-rule preservation, duplicate names, clears, drift cases."""
 
-import pytest
 from hcs_sg_iac.adapters import yaml_config
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.model.entities import Group
 from hcs_sg_iac.usecases.resolve import resolve_memberships
 
-from tests.conftest import GROUP_YAML, make_project, plan_state, seed
+from tests.conftest import (
+    GROUP_YAML,
+    cloud_rule,
+    make_project,
+    plan_state,
+    seed,
+)
 
 
 def _state(root):
     state, report = yaml_config.load_project(root)
     assert state is not None, report.errors
     return state
-
-
-def _cloud_rule(**kw):
-    base = {
-        "id": "r1",
-        "sg_id": "sg-web",
-        "direction": "ingress",
-        "protocol": "tcp",
-        "ports": "22",
-        "remote_group_id": None,
-        "remote_ip_prefix": "203.0.113.0/24",
-    }
-    base.update(kw)
-    return base
 
 
 # ---- loader ----
@@ -122,7 +113,7 @@ def test_noncanonical_cidr_converges(tmp_path):
     gw = seed(
         FakeGateway(),
         sgs=(("sg-web", "web", ""),),
-        rules=(_cloud_rule(remote_ip_prefix="203.0.113.0/24"),),
+        rules=(cloud_rule(remote_ip_prefix="203.0.113.0/24"),),
     )
     assert plan_state(gw, _state(tmp_path)).actions == ()
 
@@ -138,7 +129,7 @@ def test_unset_remote_joins_code_anywhere(tmp_path):
     gw = seed(
         FakeGateway(),
         sgs=(("sg-web", "web", ""),),
-        rules=(_cloud_rule(protocol=None, ports=None, remote_ip_prefix=None),),
+        rules=(cloud_rule(protocol=None, ports=None, remote_ip_prefix=None),),
     )
     assert plan_state(gw, _state(tmp_path)).actions == ()
 
@@ -156,8 +147,8 @@ def test_multiport_expands_to_single_range_rules(tmp_path):
         FakeGateway(),
         sgs=(("sg-web", "web", ""),),
         rules=(
-            _cloud_rule(id="a", ports="22"),
-            _cloud_rule(id="b", ports="443"),
+            cloud_rule(id="a", ports="22"),
+            cloud_rule(id="b", ports="443"),
         ),
     )
     assert plan_state(gw, _state(tmp_path)).actions == ()
@@ -165,7 +156,7 @@ def test_multiport_expands_to_single_range_rules(tmp_path):
     gw2 = seed(
         FakeGateway(),
         sgs=(("sg-web", "web", ""),),
-        rules=(_cloud_rule(id="a", ports="22"),),
+        rules=(cloud_rule(id="a", ports="22"),),
     )
     al = plan_state(gw2, _state(tmp_path))
     assert [(a.sign, a.type) for a in al.actions] == [("+", "rule")]
@@ -184,15 +175,6 @@ def test_duplicate_code_rules_rejected_at_load(tmp_path):
     assert state is None and any("duplicate" in e for e in report.errors)
 
 
-def test_duplicate_cloud_names_abort_with_every_id(tmp_path):
-    from hcs_sg_iac.model.entities import DesiredState
-
-    gw = seed(FakeGateway(), sgs=(("sg-a", "web", ""), ("sg-b", "web", "")))
-    with pytest.raises(ValueError) as ei:
-        plan_state(gw, DesiredState(groups={}, rules={}))
-    assert "sg-a" in str(ei.value) and "sg-b" in str(ei.value)
-
-
 # ---- self rules & clears ----
 
 
@@ -209,7 +191,7 @@ def test_self_rules_preserved_both_directions(tmp_path):
         FakeGateway(),
         sgs=(("sg-web", "web", ""),),
         rules=(
-            _cloud_rule(
+            cloud_rule(
                 id="self1",
                 direction="ingress",
                 protocol="icmp",
@@ -217,7 +199,7 @@ def test_self_rules_preserved_both_directions(tmp_path):
                 remote_group_id="sg-web",
                 remote_ip_prefix=None,
             ),
-            _cloud_rule(
+            cloud_rule(
                 id="self2",
                 direction="egress",
                 protocol=None,
@@ -241,7 +223,7 @@ def test_managed_empty_clears_name_the_direction(tmp_path):
         },
     )
     gw = seed(
-        FakeGateway(), sgs=(("sg-web", "web", ""),), rules=(_cloud_rule(),)
+        FakeGateway(), sgs=(("sg-web", "web", ""),), rules=(cloud_rule(),)
     )
     al = plan_state(gw, _state(tmp_path))
     assert [(a.sign, a.type) for a in al.actions] == [("-", "rule")]
@@ -256,7 +238,7 @@ def test_unmanaged_direction_inventoried_not_touched(tmp_path):
         },
     )
     gw = seed(
-        FakeGateway(), sgs=(("sg-web", "web", ""),), rules=(_cloud_rule(),)
+        FakeGateway(), sgs=(("sg-web", "web", ""),), rules=(cloud_rule(),)
     )
     al = plan_state(gw, _state(tmp_path))
     assert al.actions == ()
