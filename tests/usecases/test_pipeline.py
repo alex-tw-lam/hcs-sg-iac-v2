@@ -1,0 +1,86 @@
+# tests/usecases/test_pipeline.py
+"""The orchestration seam, directly: an injected loader + FakeGateway,
+confirmation hook and audit sink. The CLI is one consumer; these tests
+pin the pipeline's contract for future presentation layers."""
+from hcs_sg_iac.adapters.fake_gateway import FakeGateway
+from hcs_sg_iac.model.cloud import CloudNic, CloudSg
+from hcs_sg_iac.model.entities import DesiredState, Group, Member
+from hcs_sg_iac.model.report import Report
+from hcs_sg_iac.usecases import pipeline
+
+
+def _state():
+    return DesiredState(groups={"web": Group("web", "d", (Member("10.0.1.10"),))},
+                        rules={})
+
+
+def _loader(state=None, errors=()):
+    def load(project):
+        return state, Report(errors=list(errors))
+    return load
+
+
+def _planned(gw):
+    al, errors = pipeline.plan_project(_loader(_state()), gw, "unused")
+    assert al is not None, errors
+    return al
+
+
+def test_plan_project_loads_validates_resolves_and_plans():
+    gw = FakeGateway()
+    gw.add_nic(CloudNic(port_id="p1", ip="10.0.1.10"))
+    al, errors = pipeline.plan_project(_loader(_state()), gw, "unused")
+    assert errors == []
+    assert [(a.sign, a.type) for a in al.actions] == [("+", "group"),
+                                                      ("+", "member")]
+
+
+def test_plan_project_collects_failures_from_every_stage():
+    # load failure
+    al, errors = pipeline.plan_project(_loader(None, ["bad yaml"]),
+                                       FakeGateway(), "unused")
+    assert al is None and errors == ["bad yaml"]
+    # resolve failure: member ip matches no NIC
+    al, errors = pipeline.plan_project(_loader(_state()), FakeGateway(),
+                                       "unused")
+    assert al is None and any("no NIC found" in e for e in errors)
+    # plan-engine failure: duplicate cloud SG names surface as error lines
+    gw = FakeGateway()
+    gw.add_nic(CloudNic(port_id="p1", ip="10.0.1.10"))
+    gw.add_sg(CloudSg(id="sg-a", name="web"))
+    gw.add_sg(CloudSg(id="sg-b", name="web"))
+    al, errors = pipeline.plan_project(_loader(_state()), gw, "unused")
+    assert al is None and errors[0].startswith("error: duplicate")
+
+
+def test_execute_confirmed_declined_by_hook_writes_nothing():
+    gw = FakeGateway()
+    gw.add_nic(CloudNic(port_id="p1", ip="10.0.1.10"))
+    al = _planned(gw)
+    audits = []
+    results = pipeline.execute_confirmed(
+        gw, al, prompt="Apply the changes above", expect="yes",
+        confirm=lambda prompt, expect: False,
+        audit=lambda: audits.append(1))
+    assert results is None
+    assert gw.call_log == []            # declined before any write
+    assert audits == []                 # sink factory never invoked
+
+
+def test_execute_confirmed_prompts_then_runs_and_audits():
+    gw = FakeGateway()
+    gw.add_nic(CloudNic(port_id="p1", ip="10.0.1.10"))
+    al = _planned(gw)
+    seen = {}
+
+    def confirm(prompt, expect):
+        seen["prompt"], seen["expect"] = prompt, expect
+        return True
+
+    records = []
+    results = pipeline.execute_confirmed(
+        gw, al, prompt="Apply the changes above", expect="yes",
+        confirm=confirm, audit=lambda: records.append)
+    assert seen == {"prompt": "Apply the changes above", "expect": "yes"}
+    assert [r.status for r in results] == ["ok", "ok"]
+    assert len(records) == 1            # one audit record after the run
