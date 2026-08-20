@@ -9,6 +9,7 @@ import yaml
 
 from hcs_sg_iac.model.entities import (DesiredState, Group, RulesFile,
                                        parse_group, parse_rules_file)
+from hcs_sg_iac.model.remote import RemoteGroup
 from hcs_sg_iac.model.report import Report
 
 _FAILED = object()   # sentinel: read/parse failed (error already reported)
@@ -111,3 +112,36 @@ def load_project(root: Path) -> "tuple[Optional[DesiredState], Report]":
     if not report.ok:
         return None, report
     return DesiredState(groups=groups, rules=rules), report
+
+
+# ---- the other direction: entities -> file text (hcs-sg import) ----
+
+def _rule_to_dict(r) -> dict:
+    d: dict = {"protocol": r.protocol}
+    if r.ports is not None:
+        d["ports"] = r.ports
+    d["source" if r.direction == "ingress" else "destination"] = (
+        r.remote.name if isinstance(r.remote, RemoteGroup)
+        else r.remote.cidr)
+    return d
+
+
+def dump_group(g) -> str:
+    """Group entity -> groups/<name>.yaml text (the parse_group inverse).
+    An empty members list is omitted — absent and [] parse the same."""
+    d: dict = {"name": g.name, "description": g.description}
+    if g.members:
+        d["members"] = [{"ip": m.ip} for m in g.members]
+    return yaml.safe_dump(d, sort_keys=False, allow_unicode=True,
+                          default_flow_style=False)
+
+
+def dump_rules_file(rf) -> str:
+    """RulesFile entity -> rules/<name>.yaml text (the parse_rules_file
+    inverse). A None (unmanaged) direction stays absent; [] stays []."""
+    d: dict = {"security_group": rf.security_group}
+    for key, rules in (("ingress", rf.ingress), ("egress", rf.egress)):
+        if rules is not None:
+            d[key] = [_rule_to_dict(r) for r in rules]
+    return yaml.safe_dump(d, sort_keys=False, allow_unicode=True,
+                          default_flow_style=False)

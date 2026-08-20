@@ -12,6 +12,7 @@ lookup by member IP uses the fixed_ips query filter ("ip_address=...")—
 the `id` filter matches port UUIDs, not addresses. ICMP rules carry
 type/code in port_range_min/max, which are NOT ports."""
 import logging
+import time
 import warnings
 
 from huaweicloudsdkcore.auth.credentials import BasicCredentials
@@ -107,6 +108,7 @@ class HuaweiGateway:
         self._recent_calls: list = []  # capped method-name trail; travels
         # on rate errors so the exact call sequence that hit the 429 is
         # visible in the one-line error (and the audit record)
+        self._warned_low_budget = False   # one warning per run, not per call
 
     def quota_snapshot(self) -> dict:
         return self._limiter.snapshot()
@@ -121,11 +123,22 @@ class HuaweiGateway:
         self._recent_calls.append(method_name)
         del self._recent_calls[:-50]              # cap the trail
         method = getattr(self._sdk, method_name)
+        started = time.perf_counter()
         try:
             resp = method(request)
             snap = self._limiter.snapshot()
-            _log.info("gateway call %s (%s/%s this window)",
-                      method_name, snap["used_calls"], snap["effective_limit"])
+            _log.info("gateway call %s (%s/%s this window, %.0f ms)",
+                      method_name, snap["used_calls"],
+                      snap["effective_limit"],
+                      (time.perf_counter() - started) * 1000)
+            left = snap["effective_limit"] - snap["used_calls"]
+            if left <= 5 and not self._warned_low_budget:
+                self._warned_low_budget = True
+                _log.warning(
+                    "call budget nearly exhausted (%s left this window) — "
+                    "this is OUR limiter, not the cloud's: raise "
+                    "SERVICE_CALL_BUDGET (cloud cap ~90 per 5 min) for "
+                    "large batches, or let the run wait the window out", left)
             return resp
         except ServiceResponseException as e:
             if e.status_code == 429 or str(e.error_code or "").startswith("APIGW"):

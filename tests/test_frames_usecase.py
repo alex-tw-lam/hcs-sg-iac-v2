@@ -14,8 +14,10 @@ from hcs_sg_iac.adapters.ratelimit import FixedWindowLimiter
 from hcs_sg_iac.cli import render
 from hcs_sg_iac.model.entities import Rule
 from hcs_sg_iac.usecases import apply as apply_uc
+from hcs_sg_iac.usecases import importer as import_uc
 from hcs_sg_iac.usecases import pipeline, resolve as resolve_uc, \
     validate as validate_uc
+from hcs_sg_iac.model.remote import RemoteGroup
 from tests.specs.builders import check_cloud, make_project, remote_from_tag, \
     seed_gateway
 from tests.specs.frames import TIER2
@@ -146,6 +148,30 @@ def test_frame(frame, tmp_path):
             assert _plan(gw, root).actions == (), frame.id   # converged
         if frame.expect_call_log is not None:
             assert gw.call_log == frame.expect_call_log, (frame.id, gw.call_log)
+
+    elif usecase == "import":
+        snap, _ = gw.inventory()
+        imp = import_uc.import_snapshot(snap)
+        want = frame.expect_value or {}
+        assert sorted(imp.groups) == want["groups"], frame.id
+        for gname, ips in want.get("members", {}).items():
+            assert tuple(m.ip for m in imp.groups[gname].members) == ips, \
+                (frame.id, gname)
+        for gname, rows in want.get("rules", {}).items():
+            rf = imp.rules[gname]
+
+            def sig(r):
+                remote = ("group", r.remote.name) \
+                    if isinstance(r.remote, RemoteGroup) \
+                    else ("cidr", r.remote.cidr)
+                return (r.direction, r.protocol, r.ports, remote)
+
+            got = [sig(r) for r in rf.ingress] + [sig(r) for r in rf.egress]
+            assert got == [tuple(x) for x in rows], (frame.id, gname, got)
+            assert rf.ingress_managed and rf.egress_managed, frame.id
+        notes = list(imp.notes)
+        for sub in want.get("notes", ()):
+            assert any(sub in n for n in notes), (frame.id, sub, notes)
 
     elif usecase in ("render_plan", "render_exec", "render_json"):
         al = _plan(gw, root)

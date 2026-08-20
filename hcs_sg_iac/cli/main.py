@@ -20,7 +20,7 @@ from hcs_sg_iac.model.cloud import snapshot_from_json, snapshot_to_json
 from hcs_sg_iac.model.errors import (CloudError, CloudThrottled,
                                      QuotaExhausted)
 from hcs_sg_iac.usecases import drift as drift_uc
-from hcs_sg_iac.usecases import pipeline, schema_export, validate
+from hcs_sg_iac.usecases import importer, pipeline, schema_export, validate
 from hcs_sg_iac.usecases.plan import read_snapshot
 
 
@@ -117,6 +117,16 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--snapshot", metavar="FILE",
                     help="snapshot file to compare against "
                          "(default: snapshot.json when present)")
+    imp = sub.add_parser("import", parents=[common],
+                         help="generate groups/ and rules/ YAML from a "
+                              "snapshot (offline, zero cloud calls — the "
+                              "adopt-the-estate path)")
+    imp.add_argument("--snapshot", metavar="FILE",
+                     help="source snapshot (default: snapshot.json in "
+                          "the project)")
+    imp.add_argument("--force", action="store_true",
+                     help="overwrite existing groups/*.yaml and "
+                          "rules/*.yaml files")
     sp = sub.add_parser("schema", parents=[common],
                         help="print the JSON Schema of the config files")
     sp.add_argument("which", nargs="?", choices=["group", "rules", "all"],
@@ -232,6 +242,52 @@ def main(argv=None, gateway=None) -> int:
         print(f"OK: {len(state.groups)} groups, "
               f"{sum(len(rf.ingress) + len(rf.egress) for rf in state.rules.values())} "
               f"rules — validation passed")
+        return 0
+
+    if args.command == "import":
+        # Fully offline: a snapshot file in, config files out — the
+        # reverse of `apply`. Existing files are never clobbered without
+        # --force (import must not eat hand-written config).
+        src_arg = getattr(args, "snapshot", None)
+        if src_arg:
+            p_ = Path(src_arg)
+            src = p_ if p_.is_absolute() else project / p_
+        else:
+            src = project / "snapshot.json"
+        if not src.exists():
+            print("error: import needs a snapshot — run 'hcs-sg snapshot' "
+                  "or pass --snapshot FILE", file=sys.stderr)
+            return 1
+        imported = importer.import_snapshot(
+            snapshot_from_json(src.read_text(encoding="utf-8"))[0])
+        writes = {f"groups/{n}.yaml": yaml_config.dump_group(g)
+                  for n, g in imported.groups.items()}
+        writes.update({f"rules/{n}.yaml": yaml_config.dump_rules_file(rf)
+                       for n, rf in imported.rules.items()})
+        clashes = sorted(rel for rel in writes
+                         if (project / rel).exists() and not args.force)
+        if clashes:
+            print("error: refusing to overwrite existing file(s) without "
+                  f"--force: {', '.join(clashes)}", file=sys.stderr)
+            return 1
+        for rel, text in sorted(writes.items()):
+            p_ = project / rel
+            p_.parent.mkdir(parents=True, exist_ok=True)
+            p_.write_text(text, encoding="utf-8")
+        n_rules = sum(len(rf.ingress) + len(rf.egress)
+                      for rf in imported.rules.values())
+        if args.json:
+            print(json.dumps({"imported": sorted(imported.groups),
+                              "rules": n_rules,
+                              "files": sorted(writes),
+                              "notes": list(imported.notes)}, indent=2))
+            return 0
+        print(f"import: {len(imported.groups)} groups, {n_rules} rules -> "
+              f"{len(writes)} files under {project}")
+        for note in imported.notes:
+            print(f"note: {note}")
+        print("imported groups are now managed: 'hcs-sg plan' reconciles "
+              "the cloud to these files; delete a file to unmanage.")
         return 0
 
     # plan / apply / destroy need a gateway

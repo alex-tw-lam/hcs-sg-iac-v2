@@ -92,6 +92,31 @@ names never confuse it). `drift --json` emits a Liquibase-diff-shaped
 result (`missingObjects` / `unexpectedObjects` / `changedObjects` with
 per-field `referenceValue`/`comparedValue`).
 
+## Reverse import (adopt the estate)
+
+`NOT MANAGED` lines in a plan are cloud SGs with no config file. Adopt
+them by generating `groups/` and `rules/` YAML **from the snapshot** —
+offline, zero cloud calls:
+
+    hcs-sg snapshot            # fresh inventory first (the import source)
+    hcs-sg import              # writes groups/<name>.yaml + rules/<name>.yaml
+                               # refuses to overwrite existing files
+                               # without --force; --json lists what it did
+
+Both directions of every imported group are fully managed: the next
+`hcs-sg plan` reconciles the cloud to the files (delete a file to
+unmanage again). Anything the v4 config model cannot represent exactly
+is skipped **with a note, never silently**: names that cannot be file
+names, duplicate cloud names (config keys groups by name — the first id
+wins, and rules that referenced a loser by id are skipped too),
+self-referential rules (implicit: the platform re-adds them and the
+plan preserves them), IPv6 remotes and unknown protocols. Note the
+consequence spelled out in each note: a skipped RULE is no longer
+wanted, so the next plan shows it as a stale delete — remove it in the
+cloud first if you want to keep it. The property is pinned by test:
+import → write → load → plan converges with zero actions on a
+representable cloud.
+
 ## JSON Schema
 
 Editor/validation schemas for the config files, generated from the model
