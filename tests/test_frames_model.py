@@ -1,27 +1,43 @@
 # tests/test_frames_model.py
 """Tier-1 consumer: interprets tier-1 Frame rows (tests/specs/frames.py)
 against the model constructors. One dispatch table, no per-frame code."""
-import pytest
 
+import pytest
 from hcs_sg_iac.model import entities
-from hcs_sg_iac.model.actions import (Action, ActionList, AttachNic,
-                                      CreateRule, CreateSg, DeleteRule,
-                                      DeleteSg, DetachNic, UpdateSg)
+from hcs_sg_iac.model.actions import (
+    Action,
+    ActionList,
+    AttachNic,
+    CreateRule,
+    CreateSg,
+    DeleteRule,
+    DeleteSg,
+    DetachNic,
+    UpdateSg,
+)
 from hcs_sg_iac.model.portset import PortError, parse_ports
-from hcs_sg_iac.model.remote import RemoteCidr, RemoteGroup, parse_remote
+from hcs_sg_iac.model.remote import parse_remote
 from hcs_sg_iac.model.report import Report
+
 from tests.specs.builders import remote_from_tag
 from tests.specs.frames import TIER1
 
-_PAYLOADS = {"AttachNic": AttachNic, "CreateRule": CreateRule, "CreateSg": CreateSg,
-             "DeleteRule": DeleteRule, "DeleteSg": DeleteSg,
-             "DetachNic": DetachNic, "UpdateSg": UpdateSg}
+_PAYLOADS = {
+    "AttachNic": AttachNic,
+    "CreateRule": CreateRule,
+    "CreateSg": CreateSg,
+    "DeleteRule": DeleteRule,
+    "DeleteSg": DeleteSg,
+    "DetachNic": DetachNic,
+    "UpdateSg": UpdateSg,
+}
 
 
 def _check_group(g: entities.Group, want: tuple):
     name, desc, ips = want
-    assert g == entities.Group(name, desc,
-                               tuple(entities.Member(ip=i) for i in ips))
+    assert g == entities.Group(
+        name, desc, tuple(entities.Member(ip=i) for i in ips)
+    )
 
 
 def _check_rules_file(rf: entities.RulesFile, want: dict):
@@ -42,20 +58,28 @@ def test_frame(frame):
     call, raw = frame.model_call, frame.model_input
     if call in ("parse_group", "parse_rules_file"):
         report = Report()
-        parse = (entities.parse_group if call == "parse_group"
-                 else entities.parse_rules_file)
+        parse = (
+            entities.parse_group
+            if call == "parse_group"
+            else entities.parse_rules_file
+        )
         obj = parse(raw, "where", report)
         if frame.expect_ok:
             assert report.ok, report.errors
             assert obj is not None
             if frame.expect_value is not None:
-                (_check_group if call == "parse_group"
-                 else _check_rules_file)(obj, frame.expect_value)
+                (_check_group if call == "parse_group" else _check_rules_file)(
+                    obj, frame.expect_value
+                )
         else:
             assert not report.ok, report.errors
             assert obj is None
         for sub in frame.expect_error_contains:
-            assert any(sub in e for e in report.errors), (frame.id, sub, report.errors)
+            assert any(sub in e for e in report.errors), (
+                frame.id,
+                sub,
+                report.errors,
+            )
     elif call == "parse_ports":
         if frame.expect_ok:
             assert parse_ports(raw) == frame.expect_value, frame.id
@@ -66,7 +90,9 @@ def test_frame(frame):
                 assert sub in str(ei.value), frame.id
     elif call == "parse_remote":
         if frame.expect_ok:
-            assert parse_remote(raw) == remote_from_tag(frame.expect_value), frame.id
+            assert parse_remote(raw) == remote_from_tag(
+                frame.expect_value
+            ), frame.id
         else:
             with pytest.raises(ValueError) as ei:
                 parse_remote(raw)
@@ -74,17 +100,30 @@ def test_frame(frame):
                 assert sub in str(ei.value), frame.id
     elif call == "actionlist_summary":
         actions = tuple(
-            Action(sign, type_, group, detail, cloud_id,
-                   _PAYLOADS[op[0]](*op[1:]) if op else None)
-            for sign, type_, group, detail, cloud_id, op in raw["actions"])
-        al = ActionList(actions=actions, unmanaged=tuple(raw.get("unmanaged", ())),
-                        overlap=tuple(raw.get("overlap", ())))
+            Action(
+                sign,
+                type_,
+                group,
+                detail,
+                cloud_id,
+                _PAYLOADS[op[0]](*op[1:]) if op else None,
+            )
+            for sign, type_, group, detail, cloud_id, op in raw["actions"]
+        )
+        al = ActionList(
+            actions=actions,
+            unmanaged=tuple(raw.get("unmanaged", ())),
+            overlap=tuple(raw.get("overlap", ())),
+        )
         assert al.summary() == frame.expect_value, frame.id
     elif call == "desired_state":
         state = entities.DesiredState(
             groups={n: entities.Group(n, "", ()) for n in raw["groups"]},
-            rules={n: entities.RulesFile(n, (), (), True, True)
-                   for n in raw.get("rules", [])})
+            rules={
+                n: entities.RulesFile(n, (), (), True, True)
+                for n in raw.get("rules", [])
+            },
+        )
         assert set(state.groups) == set(raw["groups"])
         assert set(state.rules) == set(raw.get("rules", []))
     else:

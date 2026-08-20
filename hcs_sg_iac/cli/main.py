@@ -2,6 +2,7 @@
 """Argparse presentation layer: parse → config → gateway → pipeline →
 render. Dry run is the DEFAULT; --yes is the ONLY path to real writes —
 it confirms the preview the command prints first (no prompts)."""
+
 import argparse
 import datetime
 import json
@@ -17,13 +18,12 @@ from hcs_sg_iac.adapters import yaml_config
 from hcs_sg_iac.adapters.snapshot_gateway import SnapshotGateway
 from hcs_sg_iac.cli import render
 from hcs_sg_iac.model.cloud import snapshot_from_json, snapshot_to_json
-from hcs_sg_iac.model.errors import (CloudError, CloudThrottled,
-                                     QuotaExhausted)
+from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.usecases import drift as drift_uc
 from hcs_sg_iac.usecases import importer, pipeline, schema_export, validate
 from hcs_sg_iac.usecases.plan import read_snapshot
 
-_log = logging.getLogger("hcs_sg_iac.cli")   # --verbose: wired below
+_log = logging.getLogger("hcs_sg_iac.cli")  # --verbose: wired below
 
 
 @dataclass(frozen=True)
@@ -40,7 +40,7 @@ class Config:
 def load_config() -> Config:
     try:
         budget = int(os.environ.get("SERVICE_CALL_BUDGET", "25"))
-    except ValueError:                       # non-numeric env → safe default
+    except ValueError:  # non-numeric env → safe default
         budget = 25
     return Config(
         hcs_ak=os.environ.get("HCS_AK", ""),
@@ -61,81 +61,152 @@ class _ReadOnlyPlanParser(argparse.ArgumentParser):
     root parser (and is inherited harmlessly by the subparsers)."""
 
     def error(self, message):
-        if "unrecognized" in message and ("--execute" in message
-                                          or "--yes" in message):
-            self.exit(2, f"{self.prog}: read-only — use "
-                         f"'hcs-sg apply --yes' to write\n")
+        if "unrecognized" in message and (
+            "--execute" in message or "--yes" in message
+        ):
+            self.exit(
+                2,
+                f"{self.prog}: read-only — use "
+                f"'hcs-sg apply --yes' to write\n",
+            )
         super().error(message)
 
 
 def build_parser() -> argparse.ArgumentParser:
     # Shared flags sit AFTER the subcommand via a parent parser:
     # `hcs-sg plan --project X --json` — exactly how the tests invoke it.
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--project", default=".",
-                        help="project directory (contains groups/ and rules/)")
-    common.add_argument("--json", action="store_true",
-                        help="machine-readable output")
-    common.add_argument("--verbose", action="store_true",
-                        help="progress log to stderr (gateway calls, "
-                             "phases, per-action results)")
-    p = _ReadOnlyPlanParser(prog="hcs-sg",
-                            description="Security-group-as-code for HCS "
-                                        "(dry run by default)")
-    sub = p.add_subparsers(dest="command", required=True,
-                           parser_class=_ReadOnlyPlanParser)
-    sub.add_parser("validate", parents=[common],
-                   help="validate files only (no cloud reads)")
-    pp = sub.add_parser("plan", parents=[common],
-                        help="diff code vs cloud (read-only; never writes)")
-    pp.add_argument("--snapshot", metavar="FILE",
-                    help="plan offline from a snapshot file: zero cloud "
-                         "reads, no credentials")
-    ap = sub.add_parser("apply", parents=[common],
-                        help="apply changes (dry run unless --yes)")
-    ap.add_argument("--snapshot", metavar="FILE",
-                    help="plan offline from a snapshot file; --yes writes "
-                         "still go to the real cloud")
-    ap.add_argument("--yes", action="store_true",
-                    help="confirm and perform the writes after the "
-                         "preview (the write gate)")
-    dp = sub.add_parser("destroy", parents=[common],
-                        help="delete one security group and detach its members")
+    common = _ReadOnlyPlanParser(add_help=False)
+    common.add_argument(
+        "--project",
+        default=".",
+        help="project directory (contains groups/ and rules/)",
+    )
+    common.add_argument(
+        "--json", action="store_true", help="machine-readable output"
+    )
+    common.add_argument(
+        "--verbose",
+        action="store_true",
+        help="progress log to stderr (gateway calls, "
+        "phases, per-action results)",
+    )
+    p = _ReadOnlyPlanParser(
+        prog="hcs-sg",
+        description="Security-group-as-code for HCS " "(dry run by default)",
+    )
+    sub = p.add_subparsers(
+        dest="command", required=True, parser_class=_ReadOnlyPlanParser
+    )
+    sub.add_parser(
+        "validate",
+        parents=[common],
+        help="validate files only (no cloud reads)",
+    )
+    pp = sub.add_parser(
+        "plan",
+        parents=[common],
+        help="diff code vs cloud (read-only; never writes)",
+    )
+    pp.add_argument(
+        "--snapshot",
+        metavar="FILE",
+        help="plan offline from a snapshot file: zero cloud "
+        "reads, no credentials",
+    )
+    ap = sub.add_parser(
+        "apply", parents=[common], help="apply changes (dry run unless --yes)"
+    )
+    ap.add_argument(
+        "--snapshot",
+        metavar="FILE",
+        help="plan offline from a snapshot file; --yes writes "
+        "still go to the real cloud",
+    )
+    ap.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm and perform the writes after the "
+        "preview (the write gate)",
+    )
+    dp = sub.add_parser(
+        "destroy",
+        parents=[common],
+        help="delete one security group and detach its members",
+    )
     dp.add_argument("name")
-    dp.add_argument("--snapshot", metavar="FILE",
-                    help="plan the teardown offline from a snapshot file")
-    dp.add_argument("--yes", action="store_true",
-                    help="confirm and delete after the preview")
-    snp = sub.add_parser("snapshot", parents=[common],
-                         help="export the cloud inventory (SGs, members, "
-                              "rules, member NICs) to a JSON file")
-    snp.add_argument("--out", default="snapshot.json",
-                     help="output file inside the project "
-                          "(default: snapshot.json)")
-    dr = sub.add_parser("drift", parents=[common],
-                        help="diff the live cloud against a snapshot "
-                             "(default: snapshot.json in the project; "
-                             "rc 1 when anything drifted)")
-    dr.add_argument("--snapshot", metavar="FILE",
-                    help="snapshot file to compare against "
-                         "(default: snapshot.json when present)")
-    imp = sub.add_parser("import", parents=[common],
-                         help="generate groups/ and rules/ YAML from a "
-                              "snapshot (offline, zero cloud calls — the "
-                              "adopt-the-estate path)")
-    imp.add_argument("--snapshot", metavar="FILE",
-                     help="source snapshot (default: snapshot.json in "
-                          "the project)")
-    imp.add_argument("--force", action="store_true",
-                     help="overwrite existing groups/*.yaml and "
-                          "rules/*.yaml files")
-    sp = sub.add_parser("schema", parents=[common],
-                        help="print the JSON Schema of the config files")
-    sp.add_argument("which", nargs="?", choices=["group", "rules", "all"],
-                    default="all",
-                    help="which schema (default: both, keyed group_file/"
-                         "rules_file)")
+    dp.add_argument(
+        "--snapshot",
+        metavar="FILE",
+        help="plan the teardown offline from a snapshot file",
+    )
+    dp.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm and delete after the preview",
+    )
+    snp = sub.add_parser(
+        "snapshot",
+        parents=[common],
+        help="export the cloud inventory (SGs, members, "
+        "rules, member NICs) to a JSON file",
+    )
+    snp.add_argument(
+        "--out",
+        default="snapshot.json",
+        help="output file inside the project " "(default: snapshot.json)",
+    )
+    dr = sub.add_parser(
+        "drift",
+        parents=[common],
+        help="diff the live cloud against a snapshot "
+        "(default: snapshot.json in the project; "
+        "rc 1 when anything drifted)",
+    )
+    dr.add_argument(
+        "--snapshot",
+        metavar="FILE",
+        help="snapshot file to compare against "
+        "(default: snapshot.json when present)",
+    )
+    imp = sub.add_parser(
+        "import",
+        parents=[common],
+        help="generate groups/ and rules/ YAML from a "
+        "snapshot (offline, zero cloud calls — the "
+        "adopt-the-estate path)",
+    )
+    imp.add_argument(
+        "--snapshot",
+        metavar="FILE",
+        help="source snapshot (default: snapshot.json in " "the project)",
+    )
+    imp.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite existing groups/*.yaml and " "rules/*.yaml files",
+    )
+    sp = sub.add_parser(
+        "schema",
+        parents=[common],
+        help="print the JSON Schema of the config files",
+    )
+    sp.add_argument(
+        "which",
+        nargs="?",
+        choices=["group", "rules", "all"],
+        default="all",
+        help="which schema (default: both, keyed group_file/" "rules_file)",
+    )
     return p
+
+
+class _VerboseHandler(logging.StreamHandler):
+    """The one stderr handler --verbose installs. isinstance marks it:
+    idempotent wiring without dynamic attributes."""
+
+    def __init__(self) -> None:
+        super().__init__(sys.stderr)
+        self.setFormatter(logging.Formatter("hcs-sg: %(message)s"))
 
 
 def _configure_logging() -> None:
@@ -145,21 +216,20 @@ def _configure_logging() -> None:
     wiring twice in one process adds no duplicate lines (embedders and
     test runners call main() repeatedly)."""
     log = logging.getLogger("hcs_sg_iac")
-    ours = next((h for h in log.handlers
-                 if getattr(h, "_hcs_sg_handler", False)), None)
+    ours = next(
+        (h for h in log.handlers if isinstance(h, _VerboseHandler)), None
+    )
     if ours is not None:
-        ours.stream = sys.stderr    # rebind: capture swaps sys.stderr per test
+        ours.stream = sys.stderr  # rebind: capture swaps sys.stderr per test
         return
-    handler = logging.StreamHandler(sys.stderr)
-    handler._hcs_sg_handler = True
-    handler.setFormatter(logging.Formatter("hcs-sg: %(message)s"))
-    log.addHandler(handler)
+    log.addHandler(_VerboseHandler())
     log.setLevel(logging.INFO)
     log.propagate = False
 
 
 def _build_gateway(config: Config):
-    from hcs_sg_iac.adapters import huawei_gateway   # deferred: SDK import
+    from hcs_sg_iac.adapters import huawei_gateway  # deferred: SDK import
+
     return huawei_gateway.build_gateway(config)
 
 
@@ -170,8 +240,11 @@ def _audit_factory(project: Path, gateway):
     return lambda: audit_adapter.enrich(
         audit_adapter.jsonl_sink(project / "audit.jsonl"),
         project=str(project.resolve()),
-        quota=gateway.quota_snapshot().asdict()
-               if hasattr(gateway, "quota_snapshot") else None,
+        quota=(
+            gateway.quota_snapshot().asdict()
+            if hasattr(gateway, "quota_snapshot")
+            else None
+        ),
     )
 
 
@@ -179,8 +252,11 @@ def _print_plan(al, *, quota, args, executed=None) -> None:
     if args.json:
         print(render.render_json(al, quota=quota, executed=executed))
     else:
-        print(render.render_plan(al, quota=quota, executed=executed,
-                                 dry_run=executed is None))
+        print(
+            render.render_plan(
+                al, quota=quota, executed=executed, dry_run=executed is None
+            )
+        )
 
 
 def _print_preview(gateway, al, args) -> None:
@@ -188,8 +264,9 @@ def _print_preview(gateway, al, args) -> None:
     above" the prompt refers to must already be on screen. Dry-run form:
     no RESULT column, no Dry-run trailer. Under --json the preview goes
     to stderr so stdout stays one pure JSON document."""
-    table = render.render_plan(al, quota=pipeline.quota(gateway, al.actions),
-                               dry_run=False)
+    table = render.render_plan(
+        al, quota=pipeline.quota(gateway, al.actions), dry_run=False
+    )
     print(table, file=sys.stderr if args.json else sys.stdout)
 
 
@@ -204,10 +281,12 @@ def _snapshot_stale_note(snap_arg) -> None:
     point-in-time artifact, not a hidden state file (the repo's
     no-state-file rule); refresh or verify explicitly."""
     if snap_arg:
-        print(f"hcs-sg: note: {snap_arg} is now stale (writes applied) — "
-              f"refresh with 'hcs-sg snapshot' or verify with "
-              f"'hcs-sg drift --snapshot {snap_arg}'",
-              file=sys.stderr)
+        print(
+            f"hcs-sg: note: {snap_arg} is now stale (writes applied) — "
+            f"refresh with 'hcs-sg snapshot' or verify with "
+            f"'hcs-sg drift --snapshot {snap_arg}'",
+            file=sys.stderr,
+        )
 
 
 def _execute(gateway, al, *, args, project):
@@ -216,10 +295,15 @@ def _execute(gateway, al, *, args, project):
     rate exhaustion waits out the window and continues (notice on
     stderr; --json stdout stays pure data)."""
     return pipeline.execute_confirmed(
-        gateway, al, prompt="", expect="",
+        gateway,
+        al,
+        prompt="",
+        expect="",
         confirm=lambda prompt, expect: True,
         audit=_audit_factory(project, gateway),
-        sleep=time.sleep, notify=_notify)
+        sleep=time.sleep,
+        notify=_notify,
+    )
 
 
 def _finish(gateway, al, results, args) -> int:
@@ -228,8 +312,12 @@ def _finish(gateway, al, results, args) -> int:
     if results is None:
         print("aborted", file=sys.stderr)
         return 1
-    _print_plan(al, quota=pipeline.quota(gateway, al.actions), args=args,
-                executed=results)
+    _print_plan(
+        al,
+        quota=pipeline.quota(gateway, al.actions),
+        args=args,
+        executed=results,
+    )
     return 0 if all(r.status == "ok" for r in results) else 1
 
 
@@ -245,15 +333,19 @@ def main(argv=None, gateway=None) -> int:
 
     if args.command == "validate":
         _log.info("phase: validating the project")
-        state, report = yaml_config.load_project(project)
-        if state is not None:
-            report = validate.validate_state(state)
+        state, load_report = yaml_config.load_project(project)
+        if state is None:
+            print("\n".join(load_report.errors), file=sys.stderr)
+            return 1
+        report = validate.validate_state(state)
         if not report.ok:
             print("\n".join(report.errors), file=sys.stderr)
             return 1
-        print(f"OK: {len(state.groups)} groups, "
-              f"{sum(len(rf.ingress) + len(rf.egress) for rf in state.rules.values())} "
-              f"rules — validation passed")
+        print(
+            f"OK: {len(state.groups)} groups, "
+            f"{sum(len(rf.ingress) + len(rf.egress) for rf in state.rules.values())} "
+            f"rules — validation passed"
+        )
         return 0
 
     if args.command == "import":
@@ -267,41 +359,69 @@ def main(argv=None, gateway=None) -> int:
         else:
             src = project / "snapshot.json"
         if not src.exists():
-            print("error: import needs a snapshot — run 'hcs-sg snapshot' "
-                  "or pass --snapshot FILE", file=sys.stderr)
+            print(
+                "error: import needs a snapshot — run 'hcs-sg snapshot' "
+                "or pass --snapshot FILE",
+                file=sys.stderr,
+            )
             return 1
         _log.info("phase: importing from %s", src)
         imported = importer.import_snapshot(
-            snapshot_from_json(src.read_text(encoding="utf-8")).snapshot)
-        writes = {f"groups/{n}.yaml": yaml_config.dump_group(g)
-                  for n, g in imported.groups.items()}
-        writes.update({f"rules/{n}.yaml": yaml_config.dump_rules_file(rf)
-                       for n, rf in imported.rules.items()})
-        clashes = sorted(rel for rel in writes
-                         if (project / rel).exists() and not args.force)
+            snapshot_from_json(src.read_text(encoding="utf-8")).snapshot
+        )
+        writes = {
+            f"groups/{n}.yaml": yaml_config.dump_group(g)
+            for n, g in imported.groups.items()
+        }
+        writes.update(
+            {
+                f"rules/{n}.yaml": yaml_config.dump_rules_file(rf)
+                for n, rf in imported.rules.items()
+            }
+        )
+        clashes = sorted(
+            rel
+            for rel in writes
+            if (project / rel).exists() and not args.force
+        )
         if clashes:
-            print("error: refusing to overwrite existing file(s) without "
-                  f"--force: {', '.join(clashes)}", file=sys.stderr)
+            print(
+                "error: refusing to overwrite existing file(s) without "
+                f"--force: {', '.join(clashes)}",
+                file=sys.stderr,
+            )
             return 1
         _log.info("phase: writing %d files", len(writes))
         for rel, text in sorted(writes.items()):
             p_ = project / rel
             p_.parent.mkdir(parents=True, exist_ok=True)
             p_.write_text(text, encoding="utf-8")
-        n_rules = sum(len(rf.ingress) + len(rf.egress)
-                      for rf in imported.rules.values())
+        n_rules = sum(
+            len(rf.ingress) + len(rf.egress) for rf in imported.rules.values()
+        )
         if args.json:
-            print(json.dumps({"imported": sorted(imported.groups),
-                              "rules": n_rules,
-                              "files": sorted(writes),
-                              "notes": list(imported.notes)}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "imported": sorted(imported.groups),
+                        "rules": n_rules,
+                        "files": sorted(writes),
+                        "notes": list(imported.notes),
+                    },
+                    indent=2,
+                )
+            )
             return 0
-        print(f"import: {len(imported.groups)} groups, {n_rules} rules -> "
-              f"{len(writes)} files under {project}")
+        print(
+            f"import: {len(imported.groups)} groups, {n_rules} rules -> "
+            f"{len(writes)} files under {project}"
+        )
         for note in imported.notes:
             print(f"note: {note}")
-        print("imported groups are now managed: 'hcs-sg plan' reconciles "
-              "the cloud to these files; delete a file to unmanage.")
+        print(
+            "imported groups are now managed: 'hcs-sg plan' reconciles "
+            "the cloud to these files; delete a file to unmanage."
+        )
         return 0
 
     # plan / apply / destroy need a gateway
@@ -315,31 +435,45 @@ def main(argv=None, gateway=None) -> int:
     if snap_arg:
         p_ = Path(snap_arg)
         snap_file = p_ if p_.is_absolute() else project / p_
-    else:          # snapshot.json present -> plan from it, no flag needed
+    else:  # snapshot.json present -> plan from it, no flag needed
         default = project / "snapshot.json"
-        if args.command in ("plan", "apply", "destroy", "drift") \
-                and default.exists():
+        if (
+            args.command in ("plan", "apply", "destroy", "drift")
+            and default.exists()
+        ):
             snap_file, auto = default, True
     yes = getattr(args, "yes", False)
-    offline = snap_file is not None and args.command in ("plan", "apply",
-                                                         "destroy")
+    offline = snap_file is not None and args.command in (
+        "plan",
+        "apply",
+        "destroy",
+    )
     writing = args.command in ("apply", "destroy") and yes
-    if gateway is None and (args.command in ("snapshot", "drift")
-                            or writing or not offline):
+    if gateway is None and (
+        args.command in ("snapshot", "drift") or writing or not offline
+    ):
         config = load_config()
-        if not (config.hcs_ak and config.hcs_sk and config.hcs_endpoint
-                and config.hcs_project_id):
-            print("error: HCS_AK / HCS_SK / HCS_PROJECT_ID / HCS_ENDPOINT "
-                  "are required for live reads and writes (validate is "
-                  "offline; plan can run against --snapshot FILE)",
-                  file=sys.stderr)
+        if not (
+            config.hcs_ak
+            and config.hcs_sk
+            and config.hcs_endpoint
+            and config.hcs_project_id
+        ):
+            print(
+                "error: HCS_AK / HCS_SK / HCS_PROJECT_ID / HCS_ENDPOINT "
+                "are required for live reads and writes (validate is "
+                "offline; plan can run against --snapshot FILE)",
+                file=sys.stderr,
+            )
             return 1
         gateway = _build_gateway(config)
     readers = SnapshotGateway(snap_file) if offline else gateway
     if auto and args.command != "drift":
-        print("hcs-sg: planning from snapshot.json (offline) — refresh "
-              "with 'hcs-sg snapshot', or delete the file to read live",
-              file=sys.stderr)
+        print(
+            "hcs-sg: planning from snapshot.json (offline) — refresh "
+            "with 'hcs-sg snapshot', or delete the file to read live",
+            file=sys.stderr,
+        )
 
     # Everything below touches a gateway: rate exhaustion waits out
     # the window and continues; anything unretryable that still escapes
@@ -349,25 +483,42 @@ def main(argv=None, gateway=None) -> int:
         if args.command == "drift":
             _log.info("phase: diffing %s against the live cloud", snap_file)
             if snap_file is None:
-                print("error: drift needs a snapshot — run 'hcs-sg "
-                      "snapshot' or pass --snapshot FILE", file=sys.stderr)
+                print(
+                    "error: drift needs a snapshot — run 'hcs-sg "
+                    "snapshot' or pass --snapshot FILE",
+                    file=sys.stderr,
+                )
                 return 1
             old = snapshot_from_json(
-                snap_file.read_text(encoding="utf-8")).snapshot
+                snap_file.read_text(encoding="utf-8")
+            ).snapshot
             result = drift_uc.diff_inventory(
-                old, read_snapshot(gateway, gateway))
-            n = sum(len(result[k]) for k in
-                    ("missing", "unexpected", "changed"))
-            if args.json:      # Liquibase-diff shape (reference=snapshot)
-                print(json.dumps({"diff": {
-                    "created": datetime.datetime.now(
-                        datetime.timezone.utc).isoformat(),
-                    "reference": {"kind": "snapshot",
-                                  "file": snap_arg or "snapshot.json"},
-                    "target": {"kind": "cloud"},
-                    "missingObjects": result["missing"],
-                    "unexpectedObjects": result["unexpected"],
-                    "changedObjects": result["changed"]}}, indent=2))
+                old, read_snapshot(gateway, gateway)
+            )
+            n = sum(
+                len(result[k]) for k in ("missing", "unexpected", "changed")
+            )
+            if args.json:  # Liquibase-diff shape (reference=snapshot)
+                print(
+                    json.dumps(
+                        {
+                            "diff": {
+                                "created": datetime.datetime.now(
+                                    datetime.UTC
+                                ).isoformat(),
+                                "reference": {
+                                    "kind": "snapshot",
+                                    "file": snap_arg or "snapshot.json",
+                                },
+                                "target": {"kind": "cloud"},
+                                "missingObjects": result["missing"],
+                                "unexpectedObjects": result["unexpected"],
+                                "changedObjects": result["changed"],
+                            }
+                        },
+                        indent=2,
+                    )
+                )
                 return 1 if n else 0
             lines = drift_uc.format_lines(result)
             if lines:
@@ -383,59 +534,80 @@ def main(argv=None, gateway=None) -> int:
             if state is None:
                 print("\n".join(report.errors), file=sys.stderr)
                 return 1
-            if hasattr(gateway, "inventory"):    # whole cloud, 2 calls
+            if hasattr(gateway, "inventory"):  # whole cloud, 2 calls
                 inv = gateway.inventory()
                 snap, nics_by_ip = inv.snapshot, inv.nics_by_ip
-            else:                                 # protocol-level fallback
-                all_ips = sorted({m.ip for g in state.groups.values()
-                                  for m in g.members})
-                nics_by_ip = gateway.find_nics_by_ip(all_ips) \
-                    if all_ips else {}
+            else:  # protocol-level fallback
+                all_ips = sorted(
+                    {m.ip for g in state.groups.values() for m in g.members}
+                )
+                nics_by_ip = (
+                    gateway.find_nics_by_ip(all_ips) if all_ips else {}
+                )
                 snap = read_snapshot(gateway, gateway)
             path = project / args.out
-            path.write_text(snapshot_to_json(snap.sgs, snap.rules,
-                                             snap.attached, nics_by_ip),
-                            encoding="utf-8")
-            print(f"snapshot: {len(snap.sgs)} groups, "
-                  f"{sum(len(v) for v in snap.rules.values())} rules, "
-                  f"{sum(len(v) for v in snap.attached.values())} members, "
-                  f"{sum(len(v) for v in nics_by_ip.values())} known "
-                  f"member NICs -> {path}")
+            path.write_text(
+                snapshot_to_json(
+                    snap.sgs, snap.rules, snap.attached, nics_by_ip
+                ),
+                encoding="utf-8",
+            )
+            print(
+                f"snapshot: {len(snap.sgs)} groups, "
+                f"{sum(len(v) for v in snap.rules.values())} rules, "
+                f"{sum(len(v) for v in snap.attached.values())} members, "
+                f"{sum(len(v) for v in nics_by_ip.values())} known "
+                f"member NICs -> {path}"
+            )
             return 0
 
         if args.command == "destroy":
-            al = pipeline.plan_destroy_project(readers, args.name,
-                                               sleep=time.sleep, notify=_notify)
+            al = pipeline.plan_destroy_project(
+                readers, args.name, sleep=time.sleep, notify=_notify
+            )
             if not al.actions:
-                print(f"error: no cloud security group named {args.name!r}",
-                      file=sys.stderr)
+                print(
+                    f"error: no cloud security group named {args.name!r}",
+                    file=sys.stderr,
+                )
                 return 1
             if not yes:
-                _print_plan(al, quota=pipeline.quota(readers, al.actions),
-                            args=args)
+                _print_plan(
+                    al, quota=pipeline.quota(readers, al.actions), args=args
+                )
                 return 0
             _print_preview(gateway, al, args)
             results = _execute(gateway, al, args=args, project=project)
             rc = _finish(gateway, al, results, args)
-            _snapshot_stale_note(snap_arg or
-                                 ("snapshot.json" if auto else None))
+            _snapshot_stale_note(
+                snap_arg or ("snapshot.json" if auto else None)
+            )
             return rc
 
-        # plan / apply share the pipeline
-        al, errors = pipeline.plan_project(yaml_config.load_project, readers,
-                                           project, sleep=time.sleep,
-                                           notify=_notify)
-        if al is None:
+        # plan / apply share the pipeline (own name: the destroy branch
+        # above already bound `al` as a plain ActionList)
+        planned, errors = pipeline.plan_project(
+            yaml_config.load_project,
+            readers,
+            project,
+            sleep=time.sleep,
+            notify=_notify,
+        )
+        if planned is None:
             print("\n".join(errors), file=sys.stderr)
             return 1
 
         if args.command == "plan" or not yes:
-            _print_plan(al, quota=pipeline.quota(readers, al.actions), args=args)
+            _print_plan(
+                planned,
+                quota=pipeline.quota(readers, planned.actions),
+                args=args,
+            )
             return 0
 
-        _print_preview(gateway, al, args)     # changes visible, THEN write
-        results = _execute(gateway, al, args=args, project=project)
-        rc = _finish(gateway, al, results, args)
+        _print_preview(gateway, planned, args)  # changes visible, THEN write
+        results = _execute(gateway, planned, args=args, project=project)
+        rc = _finish(gateway, planned, results, args)
         _snapshot_stale_note(snap_arg or ("snapshot.json" if auto else None))
         return rc
     except (CloudError, CloudThrottled, QuotaExhausted) as e:

@@ -1,5 +1,6 @@
 # hcs_sg_iac/model/report.py
 """Validation report: collects every error/warning before failing."""
+
 from dataclasses import dataclass, field
 
 

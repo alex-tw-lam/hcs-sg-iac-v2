@@ -8,6 +8,7 @@ IPv4 only, and RemoteCidr is canonical regardless of construction site:
 the plan engine builds RemoteCidr directly from cloud-returned strings,
 which must compare equal to the parsed-from-YAML equivalent.
 """
+
 import ipaddress
 from dataclasses import dataclass
 
@@ -38,7 +39,7 @@ def parse_remote(value: str) -> Remote:
         net = ipaddress.ip_network(value, strict=False)
         if net.version != 4:
             raise ValueError(f"IPv6 is not supported: {value!r}")
-        return RemoteCidr(cidr=str(net))      # raises ValueError if malformed
+        return RemoteCidr(cidr=str(net))  # raises ValueError if malformed
     try:
         ip = ipaddress.ip_address(value)
     except ValueError:

@@ -5,20 +5,23 @@ must carry a reason, ids must be unique, rows must carry their tier
 routing, and the hand-written tier-4 ids must exist in the contract
 suite. The every-row-interpreted check lives in tests/conftest.py as an
 in-process collection hook (no subprocess, silent on subset runs)."""
+
 import pathlib
 
 from tests.specs.frames import DEFERRED, FRAMES, TIER4
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
-_CONTRACT = (_ROOT / "tests" / "contract"
-             / "test_gateway_contract.py").read_text(encoding="utf-8")
+_CONTRACT = (
+    _ROOT / "tests" / "contract" / "test_gateway_contract.py"
+).read_text(encoding="utf-8")
 
 
 def test_frame_ids_are_unique():
     ids = [f.id for f in FRAMES]
-    assert len(ids) == len(set(ids)), \
-        f"duplicated frame ids (suffix the literal variants): " \
+    assert len(ids) == len(set(ids)), (
+        f"duplicated frame ids (suffix the literal variants): "
         f"{sorted(i for i in ids if ids.count(i) > 1)}"
+    )
 
 
 def test_no_row_is_also_deferred():
@@ -45,5 +48,6 @@ def test_rows_carry_their_tier_routing():
 
 def test_tier4_stays_hand_written_in_the_contract_suite():
     for fid, description in TIER4.items():
-        assert fid in _CONTRACT, \
-            f"{fid} ({description}) missing from {_CONTRACT}"
+        assert (
+            fid in _CONTRACT
+        ), f"{fid} ({description}) missing from {_CONTRACT}"

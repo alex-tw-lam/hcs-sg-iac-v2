@@ -3,16 +3,19 @@
 project files on disk, seeded FakeGateway state, declarative cloud checks.
 stdlib + the package's model/pure adapters only — no pytest, no PyYAML,
 no SDK (same discipline as frames.py)."""
+
 from pathlib import Path
 
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg
-from hcs_sg_iac.model.errors import (CloudError, CloudThrottled,
-                                     QuotaExhausted)
+from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.model.remote import RemoteCidr, RemoteGroup
 
-_EXCEPTIONS = {"CloudError": CloudError, "CloudThrottled": CloudThrottled,
-               "QuotaExhausted": QuotaExhausted}
+_EXCEPTIONS = {
+    "CloudError": CloudError,
+    "CloudThrottled": CloudThrottled,
+    "QuotaExhausted": QuotaExhausted,
+}
 
 
 def make_project(tmp_path, files: dict) -> Path:
@@ -30,7 +33,11 @@ def make_project(tmp_path, files: dict) -> Path:
 
 def remote_from_tag(tag: tuple):
     """("group", name) / ("cidr", prefix) -> Remote value."""
-    return RemoteGroup(name=tag[1]) if tag[0] == "group" else RemoteCidr(cidr=tag[1])
+    return (
+        RemoteGroup(name=tag[1])
+        if tag[0] == "group"
+        else RemoteCidr(cidr=tag[1])
+    )
 
 
 def seed_gateway(spec: dict) -> FakeGateway:
@@ -44,18 +51,31 @@ def seed_gateway(spec: dict) -> FakeGateway:
     spec = spec or {}
     gw = FakeGateway()
     for s in spec.get("sgs", []):
-        gw.add_sg(CloudSg(id=s["id"], name=s["name"],
-                          description=s.get("description", "")))
+        gw.add_sg(
+            CloudSg(
+                id=s["id"],
+                name=s["name"],
+                description=s.get("description", ""),
+            )
+        )
     for r in spec.get("rules", []):
-        gw.add_rule(CloudRule(id=r["id"], sg_id=r["sg"], direction=r["direction"],
-                              protocol=r.get("protocol"), ports=r.get("ports"),
-                              remote_group_id=r.get("rgid"),
-                              remote_ip_prefix=r.get("prefix")))
+        gw.add_rule(
+            CloudRule(
+                id=r["id"],
+                sg_id=r["sg"],
+                direction=r["direction"],
+                protocol=r.get("protocol"),
+                ports=r.get("ports"),
+                remote_group_id=r.get("rgid"),
+                remote_ip_prefix=r.get("prefix"),
+            )
+        )
     for n in spec.get("nics", []):
-        gw.add_nic(CloudNic(port_id=n["port_id"], ip=n["ip"],
-                            vm_name=n.get("vm")))
+        gw.add_nic(
+            CloudNic(port_id=n["port_id"], ip=n["ip"], vm_name=n.get("vm"))
+        )
     for sg_id, port_id in spec.get("attached", []):
-        gw._attached.add((sg_id, port_id))   # seed without spending call_log
+        gw._attached.add((sg_id, port_id))  # seed without spending call_log
     gw.budget = spec.get("budget")
     for r in spec.get("raises", []):
         _inject_raise(gw, r)
@@ -94,26 +114,38 @@ def check_cloud(gw: FakeGateway, checks: tuple) -> None:
     for check in checks or ():
         op = check[0]
         if op == "sg_exists":
-            assert any(s.name == check[1] for s in gw.list_security_groups()), check
+            assert any(
+                s.name == check[1] for s in gw.list_security_groups()
+            ), check
         elif op == "sg_missing":
-            assert not any(s.name == check[1] for s in gw.list_security_groups()), check
+            assert not any(
+                s.name == check[1] for s in gw.list_security_groups()
+            ), check
         elif op == "sg_count":
             assert len(gw.list_security_groups()) == check[1], check
         elif op == "sg_desc":
-            sg = next(s for s in gw.list_security_groups() if s.name == check[1])
+            sg = next(
+                s for s in gw.list_security_groups() if s.name == check[1]
+            )
             assert sg.description == check[2], check
         elif op == "rule_count":
             assert len(gw.list_rules(_sg_id(gw, check[1]))) == check[2], check
         elif op == "rule_match":
             fields = check[2]
             rules = gw.list_rules(_sg_id(gw, check[1]))
-            assert any(all(getattr(r, k) == v for k, v in fields.items())
-                       for r in rules), (check, rules)
+            assert any(
+                all(getattr(r, k) == v for k, v in fields.items())
+                for r in rules
+            ), (check, rules)
         elif op == "attached":
-            ports = [n.port_id for n in gw.list_attached_nics(_sg_id(gw, check[1]))]
+            ports = [
+                n.port_id for n in gw.list_attached_nics(_sg_id(gw, check[1]))
+            ]
             assert check[2] in ports, (check, ports)
         elif op == "detached":
-            ports = [n.port_id for n in gw.list_attached_nics(_sg_id(gw, check[1]))]
+            ports = [
+                n.port_id for n in gw.list_attached_nics(_sg_id(gw, check[1]))
+            ]
             assert check[2] not in ports, (check, ports)
         else:
             raise AssertionError(f"unknown expect_cloud op {op!r}")

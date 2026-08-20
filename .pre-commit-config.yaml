@@ -1,0 +1,23 @@
+# Hook orchestration for networked machines (the mac dev box). NOTE:
+# pre-commit clones hook envs over HTTPS — on the air-gapped RHEL box use
+# the plain commands from README §"Lint, format, types" instead.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+      - id: black
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        files: ^hcs_sg_iac/

@@ -1,6 +1,6 @@
 [project]
 name = "hcs-sg-iac"
-version = "0.4.2"
+version = "0.4.3"
 description = "Security-group-as-code CLI for HCS 8.5.1 (validate / plan / apply, dry-run by default)"
 requires-python = ">=3.11"
 dependencies = [
@@ -9,7 +9,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "black>=24", "ruff>=0.6", "mypy>=1.11",
+       "pre-commit>=3.8"]
 
 [project.scripts]
 hcs-sg = "hcs_sg_iac.cli.main:main"
@@ -20,6 +21,27 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["hcs_sg_iac*"]
+
+[tool.black]
+line-length = 79                   # the house style this repo was born in
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 79
+target-version = "py311"
+src = ["hcs_sg_iac", "tests"]
+
+[tool.ruff.lint]
+# E/W pycodestyle · F pyflakes · I isort · UP pyupgrade · B bugbear ·
+# SIM simplify · C4 comprehensions · RUF ruff-specific
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
+ignore = ["E501"]   # black wraps what it can; long literals stay long
+
+[tool.mypy]
+python_version = "3.11"
+files = ["hcs_sg_iac"]             # the prod ring; tests stay untyped-OK
+ignore_missing_imports = true      # yaml, huaweicloudsdk*, are untyped
+check_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

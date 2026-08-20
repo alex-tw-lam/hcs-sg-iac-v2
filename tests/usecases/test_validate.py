@@ -12,8 +12,15 @@ def _state(rules=None):
 def test_multiple_bad_refs_all_reported():
     """XVAL-01/02/03 pin the single-error frames; unique here: one pass
     reports EVERY bad reference (exactly two errors, no dedup)."""
-    rf = RulesFile("db", (Rule("ingress", "tcp", "5432", RemoteGroup("ghost1")),
-                          Rule("egress", "tcp", "80", RemoteGroup("ghost2"))),
-                   (), True, False)
+    rf = RulesFile(
+        "db",
+        (
+            Rule("ingress", "tcp", "5432", RemoteGroup("ghost1")),
+            Rule("egress", "tcp", "80", RemoteGroup("ghost2")),
+        ),
+        (),
+        True,
+        False,
+    )
     r = validate_state(_state({"db": rf}))
     assert len(r.errors) == 2

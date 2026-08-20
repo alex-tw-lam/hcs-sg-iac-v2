@@ -2,6 +2,7 @@
 """Ports (interfaces). Small and segregated: plan needs only readers,
 apply additionally needs writers. Any gateway (real SDK, in-memory fake)
 is substitutable (LSP) — the contract test enforces it."""
+
 from typing import Protocol
 
 from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg
@@ -14,8 +15,12 @@ class SgReader(Protocol):
 
 
 class SgWriter(Protocol):
-    def create_security_group(self, name: str, description: str) -> CloudSg: ...
-    def update_security_group_description(self, sg_id: str, description: str) -> None: ...
+    def create_security_group(
+        self, name: str, description: str
+    ) -> CloudSg: ...
+    def update_security_group_description(
+        self, sg_id: str, description: str
+    ) -> None: ...
     def delete_security_group(self, sg_id: str) -> None: ...
 
 

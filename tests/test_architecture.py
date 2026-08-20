@@ -8,6 +8,7 @@ exactly their designated third-party lib.
 Ring direction: every internal import of a file must stay within its
 ring's allowed internal prefixes (an unregistered direction FAILS).
 """
+
 import ast
 import pathlib
 import sys
@@ -72,22 +73,27 @@ def _imports(path: pathlib.Path) -> "tuple[set, set]":
                     internal.update(f"{mod}.{a.name}" for a in node.names)
                 else:
                     roots.add(mod.split(".")[0])
-            else:                     # from . import x / from .m import y
+            else:  # from . import x / from .m import y
                 base = package.split(".") if package else []
                 if node.level > 1:
-                    base = base[:len(base) - (node.level - 1)]
-                mod = ".".join(base + (node.module.split(".")
-                                       if node.module else []))
+                    base = base[: len(base) - (node.level - 1)]
+                mod = ".".join(
+                    base + (node.module.split(".") if node.module else [])
+                )
                 if mod:
                     internal.add(mod)
-                internal.update(f"{mod}.{a.name}" if mod else a.name
-                                for a in node.names)
+                internal.update(
+                    f"{mod}.{a.name}" if mod else a.name for a in node.names
+                )
     return roots, internal
 
 
 def _outward(internal: set, allowed: set) -> set:
-    return {i for i in internal
-            if not any(i == a or i.startswith(a + ".") for a in allowed)}
+    return {
+        i
+        for i in internal
+        if not any(i == a or i.startswith(a + ".") for a in allowed)
+    }
 
 
 def _all_files() -> list:
@@ -100,7 +106,10 @@ def _all_files() -> list:
 
 
 _ALL = _all_files()
-_id = lambda p: f"{p.parent.name}/{p.name}"
+
+
+def _id(p):
+    return f"{p.parent.name}/{p.name}"
 
 
 @pytest.mark.parametrize("path", _ALL, ids=_id)
@@ -108,12 +117,18 @@ def test_third_party_imports_are_designated(path):
     """Stdlib + hcs_sg_iac everywhere; adapters additionally only their
     registered third-party lib (an unregistered adapter file FAILS)."""
     roots = _imports(path)[0] - STDLIB - ALLOWED_INTERNAL
-    allowed = (ADAPTER_THIRD_PARTY.get(path.name)
-               if path.parent.name == "adapters" else set())
-    assert allowed is not None, \
-        f"adapters/{path.name} is unregistered — add it to " \
+    allowed = (
+        ADAPTER_THIRD_PARTY.get(path.name)
+        if path.parent.name == "adapters"
+        else set()
+    )
+    assert allowed is not None, (
+        f"adapters/{path.name} is unregistered — add it to "
         f"ADAPTER_THIRD_PARTY deliberately"
-    assert roots <= allowed, f"{path.parent.name}/{path.name} imports {roots - allowed}"
+    )
+    assert (
+        roots <= allowed
+    ), f"{path.parent.name}/{path.name} imports {roots - allowed}"
 
 
 @pytest.mark.parametrize("path", _ALL, ids=_id)
