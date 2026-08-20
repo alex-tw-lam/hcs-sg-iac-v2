@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from hcs_sg_iac.model.common import RemoteGroup, Report
 from hcs_sg_iac.model.entities import (
     GROUP_NAME_RE,
     DesiredState,
@@ -16,8 +17,6 @@ from hcs_sg_iac.model.entities import (
     parse_rule_list,
 )
 from hcs_sg_iac.model.portset import PortSet
-from hcs_sg_iac.model.remote import RemoteGroup
-from hcs_sg_iac.model.report import Report
 
 _FAILED = object()  # sentinel: read/parse failed (error already reported)
 
@@ -153,7 +152,25 @@ def _load_per_sg_layout(
                 ingress_managed=ing_managed,
                 egress_managed=eg_managed,
             )
+    _check_remote_refs(groups, rules, report)
     return groups, rules
+
+
+def _check_remote_refs(groups: dict, rules: dict, report) -> None:
+    """The one cross-file rule: a RemoteGroup reference must point at a
+    group this project declares (checked AFTER the loop — the target may
+    live in a directory sorted later)."""
+    for gname, rf in rules.items():
+        for rule in rf.ingress + rf.egress:
+            if (
+                isinstance(rule.remote, RemoteGroup)
+                and rule.remote.name not in groups
+            ):
+                report.error(
+                    f"security-groups/{gname}/",
+                    f"{rule.direction} references unknown group "
+                    f"{rule.remote.name!r}",
+                )
 
 
 def load_project(root: Path) -> "tuple[DesiredState | None, Report]":

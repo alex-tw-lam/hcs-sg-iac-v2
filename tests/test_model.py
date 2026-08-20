@@ -11,10 +11,9 @@ from hcs_sg_iac.model.cloud import (
     snapshot_from_json,
     snapshot_to_json,
 )
+from hcs_sg_iac.model.common import Report, parse_remote
 from hcs_sg_iac.model.entities import parse_group, parse_rule_list
 from hcs_sg_iac.model.portset import PortError, parse_ports
-from hcs_sg_iac.model.remote import parse_remote
-from hcs_sg_iac.model.report import Report
 
 
 def _group(d):

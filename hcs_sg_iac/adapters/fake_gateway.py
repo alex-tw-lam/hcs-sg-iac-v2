@@ -11,7 +11,7 @@ from hcs_sg_iac.model.cloud import (
     Inventory,
     Snapshot,
 )
-from hcs_sg_iac.model.errors import CloudError, QuotaExhausted
+from hcs_sg_iac.model.common import CloudError, QuotaExhausted
 from hcs_sg_iac.model.quota import Quota
 
 _log = logging.getLogger(__name__)  # --verbose: wired by the CLI

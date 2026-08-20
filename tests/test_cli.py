@@ -6,7 +6,7 @@ import json
 
 import pytest
 from hcs_sg_iac.cli.main import main
-from hcs_sg_iac.model.errors import CloudError
+from hcs_sg_iac.model.common import CloudError
 
 from tests.conftest import INGRESS_YAML, ExhaustOnce, run, seed
 

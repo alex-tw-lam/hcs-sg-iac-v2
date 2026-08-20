@@ -8,8 +8,8 @@ import os
 
 import pytest
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
+from hcs_sg_iac.model.common import RemoteCidr, RemoteGroup
 from hcs_sg_iac.model.entities import Rule
-from hcs_sg_iac.model.remote import RemoteCidr, RemoteGroup
 
 
 def _real_gateway():

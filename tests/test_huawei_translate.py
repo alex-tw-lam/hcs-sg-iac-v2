@@ -13,7 +13,7 @@ from hcs_sg_iac.adapters.huawei_gateway import (
     _bounds,
 )
 from hcs_sg_iac.adapters.ratelimit import FixedWindowLimiter
-from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.common import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.model.portset import PortSet
 from huaweicloudsdkcore.exceptions.exceptions import (
     ClientRequestException,

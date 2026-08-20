@@ -9,11 +9,11 @@ import-pure."""
 import logging
 
 from hcs_sg_iac.model.actions import ActionList
-from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.common import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.model.quota import QuotaPlan
 from hcs_sg_iac.usecases import apply as apply_uc
 from hcs_sg_iac.usecases import plan as plan_uc
-from hcs_sg_iac.usecases import resolve, validate
+from hcs_sg_iac.usecases import resolve
 
 _log = logging.getLogger(__name__)  # --verbose: wired by the CLI
 
@@ -33,9 +33,6 @@ def plan_project(
     state, report = load_project(project)
     if state is None:
         return None, list(report.errors)
-    report = validate.validate_state(state)
-    if not report.ok:
-        return None, list(report.errors)
     waits = 0
     while True:
         try:
@@ -46,7 +43,7 @@ def plan_project(
             resolution = resolve.resolve_memberships(gateway, state)
             if not resolution.report.ok:
                 return None, list(resolution.report.errors)
-            snapshot = plan_uc.read_snapshot(gateway, gateway)
+            snapshot = plan_uc.read_snapshot(gateway)
             return plan_uc.plan(state, resolution, snapshot), []
         except ValueError as e:  # duplicate cloud SG names etc.
             return None, [f"error: {e}"]
@@ -70,9 +67,7 @@ def plan_destroy_project(
     waits = 0
     while True:
         try:
-            return plan_uc.plan_destroy(
-                name, plan_uc.read_snapshot(gateway, gateway)
-            )
+            return plan_uc.plan_destroy(name, plan_uc.read_snapshot(gateway))
         except (QuotaExhausted, CloudThrottled) as e:
             if waits < _MAX_WAITS and apply_uc.wait_for_window(
                 e, sleep=sleep, notify=notify, what="destroy reads"
@@ -83,24 +78,10 @@ def plan_destroy_project(
 
 
 def execute_confirmed(
-    gateway,
-    al: ActionList,
-    *,
-    prompt: str,
-    expect: str,
-    confirm,
-    audit,
-    sleep=None,
-    notify=None,
-) -> "list | None":
-    """The execute flow after a plan: confirmation gate → audit sink →
-    run. `confirm` is the presentation's (prompt, expect) -> bool hook;
-    `audit` is a zero-arg factory so the sink (and its quota context) is
-    captured only when a run really starts. `sleep`/`notify` opt into
-    wait-and-continue on rate exhaustion (see usecases/apply.py). Returns
-    one ActionResult per action, or None when confirmation declined."""
-    if not confirm(prompt, expect):
-        return None
+    gateway, al: ActionList, *, sleep=None, notify=None
+) -> list:
+    """The execute flow after a confirmed plan (--yes IS the consent).
+    `sleep`/`notify` opt into wait-and-continue on rate exhaustion."""
     _log.info(
         "phase: executing %d confirmed actions",
         sum(1 for a in al.actions if a.op is not None),
@@ -110,7 +91,6 @@ def execute_confirmed(
         sg_writer=gateway,
         rule_writer=gateway,
         binder=gateway,
-        audit=audit(),
         sleep=sleep,
         notify=notify,
     )

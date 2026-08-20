@@ -7,9 +7,8 @@ import re
 from dataclasses import dataclass
 from typing import cast
 
+from hcs_sg_iac.model.common import Remote, Report, parse_remote
 from hcs_sg_iac.model.portset import PortError, PortSet, parse_ports
-from hcs_sg_iac.model.remote import Remote, parse_remote
-from hcs_sg_iac.model.report import Report
 
 GROUP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 PROTOCOLS = ("tcp", "udp", "icmp", "icmpv6", "all")

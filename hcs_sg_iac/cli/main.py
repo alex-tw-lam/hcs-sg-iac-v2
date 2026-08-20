@@ -14,14 +14,13 @@ import typing
 from dataclasses import dataclass
 from pathlib import Path
 
-from hcs_sg_iac.adapters import audit as audit_adapter
 from hcs_sg_iac.adapters import yaml_config
 from hcs_sg_iac.adapters.snapshot_gateway import SnapshotGateway
 from hcs_sg_iac.cli import render
 from hcs_sg_iac.model.cloud import snapshot_from_json, snapshot_to_json
-from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.common import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.usecases import drift as drift_uc
-from hcs_sg_iac.usecases import importer, pipeline, schema_export, validate
+from hcs_sg_iac.usecases import importer, pipeline
 from hcs_sg_iac.usecases.plan import read_snapshot
 
 _log = logging.getLogger("hcs_sg_iac.cli")  # --verbose: wired below
@@ -55,7 +54,7 @@ def load_config() -> Config:
 
 
 class _ReadOnlyPlanParser(argparse.ArgumentParser):
-    """Read-only verbs (plan/validate/schema) accept no --execute/--yes:
+    """Read-only verbs (plan/validate) accept no --execute/--yes:
     the writing flag cannot reach them by flag fumbling — parse-time
     rejection (exit 2) that says what to run instead. argparse funnels
     subparser unrecognized-arg errors here, so the guard sits on the
@@ -80,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--project",
         default=".",
-        help="project directory (contains groups/ and rules/)",
+        help="project directory (security-groups/ tree)",
     )
     common.add_argument(
         "--json", action="store_true", help="machine-readable output"
@@ -90,6 +89,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="progress log to stderr (gateway calls, "
         "phases, per-action results)",
+    )
+    snap = _ReadOnlyPlanParser(add_help=False)
+    snap.add_argument(
+        "--snapshot",
+        metavar="FILE",
+        help="use this snapshot file instead of live cloud reads",
+    )
+    yesp = _ReadOnlyPlanParser(add_help=False)
+    yesp.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm and perform the writes after the preview "
+        "(the write gate)",
     )
     p = _ReadOnlyPlanParser(
         prog="hcs-sg",
@@ -103,48 +115,22 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="validate files only (no cloud reads)",
     )
-    pp = sub.add_parser(
+    sub.add_parser(
         "plan",
-        parents=[common],
+        parents=[common, snap],
         help="diff code vs cloud (read-only; never writes)",
     )
-    pp.add_argument(
-        "--snapshot",
-        metavar="FILE",
-        help="plan offline from a snapshot file: zero cloud "
-        "reads, no credentials",
-    )
-    ap = sub.add_parser(
-        "apply", parents=[common], help="apply changes (dry run unless --yes)"
-    )
-    ap.add_argument(
-        "--snapshot",
-        metavar="FILE",
-        help="plan offline from a snapshot file; --yes writes "
-        "still go to the real cloud",
-    )
-    ap.add_argument(
-        "--yes",
-        action="store_true",
-        help="confirm and perform the writes after the "
-        "preview (the write gate)",
+    sub.add_parser(
+        "apply",
+        parents=[common, snap, yesp],
+        help="apply changes (dry run unless --yes)",
     )
     dp = sub.add_parser(
         "destroy",
-        parents=[common],
+        parents=[common, snap, yesp],
         help="delete one security group and detach its members",
     )
     dp.add_argument("name")
-    dp.add_argument(
-        "--snapshot",
-        metavar="FILE",
-        help="plan the teardown offline from a snapshot file",
-    )
-    dp.add_argument(
-        "--yes",
-        action="store_true",
-        help="confirm and delete after the preview",
-    )
     snp = sub.add_parser(
         "snapshot",
         parents=[common],
@@ -156,48 +142,24 @@ def build_parser() -> argparse.ArgumentParser:
         default="snapshot.json",
         help="output file inside the project " "(default: snapshot.json)",
     )
-    dr = sub.add_parser(
+    sub.add_parser(
         "drift",
-        parents=[common],
+        parents=[common, snap],
         help="diff the live cloud against a snapshot "
         "(default: snapshot.json in the project; "
         "rc 1 when anything drifted)",
     )
-    dr.add_argument(
-        "--snapshot",
-        metavar="FILE",
-        help="snapshot file to compare against "
-        "(default: snapshot.json when present)",
-    )
     imp = sub.add_parser(
         "import",
-        parents=[common],
-        help="generate groups/ and rules/ YAML from a "
+        parents=[common, snap],
+        help="generate security-groups/ YAML from a "
         "snapshot (offline, zero cloud calls — the "
         "adopt-the-estate path)",
     )
     imp.add_argument(
-        "--snapshot",
-        metavar="FILE",
-        help="source snapshot (default: snapshot.json in " "the project)",
-    )
-    imp.add_argument(
         "--force",
         action="store_true",
-        help="overwrite existing groups/*.yaml and " "rules/*.yaml files",
-    )
-    sp = sub.add_parser(
-        "schema",
-        parents=[common],
-        help="print the JSON Schema of the config files",
-    )
-    sp.add_argument(
-        "which",
-        nargs="?",
-        choices=["group", "ingress", "egress", "all"],
-        default="all",
-        help="which schema (default: all, keyed group_file/"
-        "ingress_file/egress_file)",
+        help="overwrite existing security-groups/ files",
     )
     return p
 
@@ -233,21 +195,6 @@ def _build_gateway(config: Config):
     from hcs_sg_iac.adapters import huawei_gateway  # deferred: SDK import
 
     return huawei_gateway.build_gateway(config)
-
-
-def _audit_factory(project: Path, gateway):
-    """adapters.audit wiring handed to the pipeline's execute path (the
-    sink is built — and its quota context captured — only when a run
-    really starts). Lives here because usecases never import adapters."""
-    return lambda: audit_adapter.enrich(
-        audit_adapter.jsonl_sink(project / "audit.jsonl"),
-        project=str(project.resolve()),
-        quota=(
-            gateway.quota_snapshot().asdict()
-            if hasattr(gateway, "quota_snapshot")
-            else None
-        ),
-    )
 
 
 def _print_plan(al, *, quota, args, executed=None) -> None:
@@ -291,29 +238,14 @@ def _snapshot_stale_note(snap_arg) -> None:
         )
 
 
-def _execute(gateway, al, *, args, project):
-    """Shared write tail for apply --yes and destroy --yes: audit sink →
-    run. --yes IS the consent (the preview printed above is the plan);
-    rate exhaustion waits out the window and continues (notice on
-    stderr; --json stdout stays pure data)."""
-    return pipeline.execute_confirmed(
-        gateway,
-        al,
-        prompt="",
-        expect="",
-        confirm=lambda prompt, expect: True,
-        audit=_audit_factory(project, gateway),
-        sleep=time.sleep,
-        notify=_notify,
+def _write(gateway, al, args) -> int:
+    """Shared write tail for apply --yes and destroy --yes: preview is
+    already on screen, --yes IS the consent; rate exhaustion waits out
+    the window and continues (notice on stderr; --json stdout stays
+    pure). Returns rc (any non-ok action maps to 1)."""
+    results = pipeline.execute_confirmed(
+        gateway, al, sleep=time.sleep, notify=_notify
     )
-
-
-def _finish(gateway, al, results, args) -> int:
-    """Shared post-execute tail: fresh quota (the writes just spent it);
-    any failure (or a declined confirmation) maps to rc 1."""
-    if results is None:
-        print("aborted", file=sys.stderr)
-        return 1
     _print_plan(
         al,
         quota=pipeline.quota(gateway, al.actions),
@@ -414,12 +346,8 @@ def _resolve_ctx(args, project, gateway) -> "tuple[_Ctx, int | None]":
 
 def _cmd_validate(args, project) -> int:
     _log.info("phase: validating the project")
-    state, load_report = yaml_config.load_project(project)
+    state, report = yaml_config.load_project(project)
     if state is None:
-        print("\n".join(load_report.errors), file=sys.stderr)
-        return 1
-    report = validate.validate_state(state)
-    if not report.ok:
         print("\n".join(report.errors), file=sys.stderr)
         return 1
     print(
@@ -512,9 +440,7 @@ def _cmd_drift(args, ctx: _Ctx) -> int:
     old = snapshot_from_json(
         ctx.snap_file.read_text(encoding="utf-8")
     ).snapshot
-    result = drift_uc.diff_inventory(
-        old, read_snapshot(ctx.gateway, ctx.gateway)
-    )
+    result = drift_uc.diff_inventory(old, read_snapshot(ctx.gateway))
     n = sum(len(result[k]) for k in ("missing", "unexpected", "changed"))
     if args.json:  # Liquibase-diff shape (reference=snapshot)
         print(
@@ -562,7 +488,7 @@ def _cmd_snapshot(args, ctx: _Ctx) -> int:
             {m.ip for g in state.groups.values() for m in g.members}
         )
         nics_by_ip = gateway.find_nics_by_ip(all_ips) if all_ips else {}
-        snap = read_snapshot(gateway, gateway)
+        snap = read_snapshot(gateway)
     path = ctx.project / args.out
     path.write_text(
         snapshot_to_json(snap.sgs, snap.rules, snap.attached, nics_by_ip),
@@ -594,8 +520,7 @@ def _cmd_destroy(args, ctx: _Ctx) -> int:
         )
         return 0
     _print_preview(ctx.gateway, al, args)
-    results = _execute(ctx.gateway, al, args=args, project=ctx.project)
-    rc = _finish(ctx.gateway, al, results, args)
+    rc = _write(ctx.gateway, al, args)
     _snapshot_stale_note(ctx.stale_note_source())
     return rc
 
@@ -619,8 +544,7 @@ def _cmd_plan_apply(args, ctx: _Ctx) -> int:
         )
         return 0
     _print_preview(ctx.gateway, planned, args)  # changes visible, THEN write
-    results = _execute(ctx.gateway, planned, args=args, project=ctx.project)
-    rc = _finish(ctx.gateway, planned, results, args)
+    rc = _write(ctx.gateway, planned, args)
     _snapshot_stale_note(ctx.stale_note_source())
     return rc
 
@@ -631,9 +555,6 @@ def main(argv=None, gateway=None) -> int:
         _configure_logging()
     project = Path(args.project)
 
-    if args.command == "schema":
-        print(schema_export.dumps(args.which))
-        return 0
     if args.command == "validate":
         return _cmd_validate(args, project)
     if args.command == "import":

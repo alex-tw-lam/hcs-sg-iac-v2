@@ -9,7 +9,6 @@ carries a retry deadline (QuotaExhausted.retry_at / CloudThrottled
 window to roll over and RETRIES the same action, so a run continues
 across windows instead of stopping."""
 
-import datetime
 import logging
 import time
 from typing import Literal
@@ -25,7 +24,7 @@ from hcs_sg_iac.model.actions import (
     DetachNic,
     UpdateSg,
 )
-from hcs_sg_iac.model.errors import CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.common import CloudThrottled, QuotaExhausted
 
 _log = logging.getLogger(__name__)  # --verbose: wired by the CLI
 
@@ -106,7 +105,6 @@ def execute(
     sg_writer,
     rule_writer,
     binder,
-    audit=None,
     sleep=None,
     notify=None,
 ) -> list:
@@ -190,26 +188,4 @@ def execute(
                 _record(results, action, "failed", str(e))
                 break
 
-    if audit is not None:
-        audit(
-            {
-                "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-                "summary": {
-                    k: sum(1 for r in results if r.status == k)
-                    for k in ("ok", "failed", "throttled")
-                },
-                "created": dict(created_sg_ids),
-                "actions": [
-                    {
-                        "group": r.action.group,
-                        "type": r.action.type,
-                        "cloud_id": r.action.cloud_id,
-                        "detail": r.action.detail,
-                        "status": r.status,
-                        "error": r.error,
-                    }
-                    for r in results
-                ],
-            }
-        )
     return results
