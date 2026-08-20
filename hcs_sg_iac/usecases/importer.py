@@ -104,9 +104,11 @@ def import_snapshot(snap: Snapshot) -> ImportedState:
                                  f"{_DELETE_NOTE}")
                     continue
             else:
-                notes.append(f"skip rule {r.id} of {name!r}: "
-                             f"no remote{_DELETE_NOTE}")
-                continue
+                # Unset remote == anywhere: the plan engine already gives
+                # such cloud rules the 0.0.0.0/0 identity ("API default
+                # when unset"); import must agree or the rule would show
+                # up as a phantom stale delete on the next plan.
+                remote = RemoteCidr(cidr="0.0.0.0/0")
             rule = Rule(direction=r.direction, protocol=protocol,
                         ports=r.ports, remote=remote)
             if rule.identity() in identities[r.direction]:
