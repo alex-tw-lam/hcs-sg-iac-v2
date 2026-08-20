@@ -14,6 +14,42 @@ model          model/        entities · portset · remote · actions ·
                              cloud · gateway (five Protocols) · report · errors
 ```
 
+## Reading order for someone new
+
+The click path most people take — each step answers the question the
+previous one raises:
+
+1. `README.md` — the usage contract: dry run is the default, `--yes` is
+   the only write gate, the preview prints before any write.
+2. `pytest -q` — the whole suite runs in ~1s with no cloud; everything
+   tests against `adapters/fake_gateway.py`. `tests/specs/frames.py`
+   is a declarative catalogue: the tests ARE the spec.
+3. `cli/main.py:main()` — top-to-bottom is the command lifecycle:
+   schema/validate/import are offline, snapshot/drift read the cloud,
+   plan/apply go through `usecases/pipeline.py`.
+4. `model/gateway.py` — five small Protocols, ~30 lines. This is where
+   the design clicks: `huawei_gateway` (SDK), `fake_gateway` (tests)
+   and `snapshot_gateway` (offline replay of a snapshot file) are three
+   interchangeable "clouds" behind the same five methods — which is
+   also why `plan` runs offline from `snapshot.json` with no
+   credentials.
+5. `model/entities.py` — the model IS the schema: constructors validate
+   and collect ALL violations into a Report (why there is no pydantic).
+6. `usecases/plan.py` — the product's brain: YAML rules and cloud rules
+   join on identity tuples `(direction, protocol, ports, remote)`;
+   self-referential rules are preserved; duplicate cloud names stop
+   the plan. drift/import/apply are variations on the same identity
+   semantics.
+7. `model/actions.py` — plan output is data: one ActionList carries
+   both the display rows (renderer) and the executable payloads
+   (apply); no second source of truth.
+8. `tests/test_architecture.py` — the dependency rule is executable;
+   the extension table below answers "where would I add X".
+
+Naming that pays off once seen: `Group`/`Rule` = desired state (from
+YAML); `CloudSg`/`CloudRule`/`CloudNic` = observed state (from a
+gateway); `Snapshot` = one whole observed cloud at a point in time.
+
 ## Rings and their one-line jobs
 
 | Ring | Modules | Responsibility |

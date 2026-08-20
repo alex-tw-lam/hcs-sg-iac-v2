@@ -203,7 +203,9 @@ removes only ours, so a spare port keeps its other groups).
 
 ## Architecture
 
-Clean architecture rings, AST-enforced (tests/test_architecture.py):
+New to the code? `docs/architecture.md` opens with a reading order
+(the eight-step click path). Summary: clean architecture rings,
+AST-enforced (tests/test_architecture.py):
 `model/` and `usecases/` are pure stdlib; PyYAML lives only in
 `adapters/yaml_config.py`, the Huawei SDK only in
 `adapters/huawei_gateway.py`; `cli/` is a thin argparse layer. The
