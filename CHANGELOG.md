@@ -3,6 +3,20 @@
 Semantic versioning; pre-1.0 minors carry breaking changes.
 
 ## Unreleased
+- **New: `hcs-sg import` — reverse import / adopt the estate.**
+  Generates `groups/*.yaml` + `rules/*.yaml` from a snapshot (default
+  `snapshot.json`; offline, zero cloud calls, no credentials). Refuses
+  to overwrite existing files without `--force`; `--json` lists
+  imported groups, written files and notes. Unrepresentable things are
+  skipped with notes (bad names, duplicate cloud names, IPv6 remotes,
+  unknown protocols, duplicate identities); self-referential rules stay
+  implicit; a skipped RULE is an honest stale delete in the next plan —
+  the note says so. Pinned property: import → write → load → plan
+  converges (zero actions) on a representable cloud. Frame aspect A27
+  (IMP-01…08); SNAP/DRIFT rows relabelled to aspect A26.
+- `--verbose` gateway logs now carry per-call duration, and a one-time
+  warning fires when the local budget is nearly exhausted (with the
+  SERVICE_CALL_BUDGET guidance).
 - First real-cloud contract run (HCS 8.5.1): CTRCT-03 (inventory parity)
   PASSED — the 2-call snapshot path is validated against per-SG reads on
   the live cloud. Two test bugs fixed, no production change:

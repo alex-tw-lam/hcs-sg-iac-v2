@@ -78,7 +78,8 @@ uniqueness · A12 file-store integrity · A13 cross-file validation · A14
 member resolution · A15 cloud group state · A16 rule identity (plan) · A17
 direction governance · A18 membership drift · A19 execution · A20 CLI
 interaction · A21 rendering · A22 rate limiter · A23 Huawei translation ·
-A24 FakeGateway fidelity · A25 gateway contract.
+A24 FakeGateway fidelity · A25 gateway contract · A26 cloud snapshot &
+drift · A27 reverse import.
 
 (Exact category values per aspect are the unions of the field-choice rows
 above; the executable truth is `tests/specs/frames.py`.)

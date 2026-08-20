@@ -111,19 +111,28 @@ def _cli(**kw) -> dict:
     return kw
 
 
-def _nic(ip, port):
-    return '{"port_id": "%s", "ip": "%s", "vm_name": null}' % (port, ip)
-
-
-def _snapshot(sgs=(("sg-web", "web"),), nics=(("10.0.1.10", "p1"),)):
-    """Snapshot JSON text: sgs as (id, name) pairs with empty desc, the
-    member-IP NIC index, and no rules/attachments recorded."""
-    sg_json = ", ".join('{"id": "%s", "name": "%s", "description": ""}'
-                        % (sid, name) for sid, name in sgs)
-    ip_json = ", ".join('"%s": [%s]' % (ip, _nic(ip, port))
-                        for ip, port in nics)
-    return ('{"sgs": [%s], "rules": {}, "attached": {}, '
-            '"nics_by_ip": {%s}}' % (sg_json, ip_json))
+def _snapshot(sgs=(("sg-web", "web"),), nics=(("10.0.1.10", "p1"),),
+              rules=(), attached=()):
+    """Snapshot JSON text. sgs as (id, name) pairs (empty description),
+    nics as the member-IP index (ip, port). rules are raw CloudRule-ish
+    dicts ({id, sg, direction, protocol?, ports?, rgid?, prefix?});
+    attached are (sg_id, port_id, ip) triples."""
+    d = {"sgs": [{"id": sid, "name": name, "description": ""}
+                 for sid, name in sgs],
+         "rules": {}, "attached": {},
+         "nics_by_ip": {ip: [{"port_id": port, "ip": ip, "vm_name": None}]
+                        for ip, port in nics}}
+    for r in rules:
+        d["rules"].setdefault(r["sg"], []).append({
+            "id": r["id"], "sg_id": r["sg"], "direction": r["direction"],
+            "protocol": r.get("protocol"), "ports": r.get("ports"),
+            "remote_group_id": r.get("rgid"),
+            "remote_ip_prefix": r.get("prefix")})
+    for sg_id, port, ip in attached:
+        d["attached"].setdefault(sg_id, []).append(
+            {"port_id": port, "ip": ip, "vm_name": None})
+    import json
+    return json.dumps(d)
 
 
 FRAMES: list = [
@@ -1230,7 +1239,7 @@ FRAMES: list = [
           **_cli(argv=["apply", "--yes"], expect_rc=0,
                  expect_out=("Plan: 2 to add", "RESULT", "Apply complete"),
                  expect_cloud=(("sg_exists", "web"),))),
-    Frame("SNAP-01", 3, "A23",
+    Frame("SNAP-01", 3, "A26",
           "snapshot exports the inventory into the project dir",
           **_cli(argv=["snapshot"],
                  cloud={"sgs": [{"id": "sg-web", "name": "web"}],
@@ -1239,7 +1248,7 @@ FRAMES: list = [
                  expect_rc=0,
                  expect_out=("snapshot: 1 groups", "1 members"),
                  expect_files=("snapshot.json",))),
-    Frame("SNAP-02", 3, "A23",
+    Frame("SNAP-02", 3, "A26",
           "plan --snapshot is fully offline: no creds, zero cloud reads",
           files={"groups/web.yaml": _group(),
                  "snapshot.json": _snapshot()},
@@ -1248,14 +1257,14 @@ FRAMES: list = [
           env={"HCS_AK": None, "HCS_SK": None, "HCS_PROJECT_ID": None,
                "HCS_ENDPOINT": None},
           expect_out=("+", "member", "Dry run")),
-    Frame("SNAP-03", 3, "A23",
+    Frame("SNAP-03", 3, "A26",
           "apply --yes --snapshot warns the file is now stale",
           files={"groups/web.yaml": _group(members=()),
                  "snapshot.json": _snapshot(nics=())},
           cloud={"sgs": [{"id": "sg-web", "name": "web", "description": ""}]},
           argv=["apply", "--yes", "--snapshot", "snapshot.json"],
           expect_rc=0, expect_err=("stale", "hcs-sg drift")),
-    Frame("SNAP-04", 3, "A23",
+    Frame("SNAP-04", 3, "A26",
           "snapshot.json present: plan uses it with no flag, no creds",
           files={"groups/web.yaml": _group(),
                  "snapshot.json": _snapshot()},
@@ -1265,21 +1274,21 @@ FRAMES: list = [
                "HCS_ENDPOINT": None},
           expect_out=("+", "member", "Dry run"),
           expect_err=("planning from snapshot.json",)),
-    Frame("DRIFT-01", 3, "A23",
+    Frame("DRIFT-01", 3, "A26",
           "drift lists cloud changes since the snapshot, rc 1",
           files={"groups/web.yaml": _group(members=()),
                  "snapshot.json": _snapshot()},
           cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}]},
           argv=["drift", "--snapshot", "snapshot.json"], expect_rc=1,
           expect_out=("- group web (sg-web) deleted", "Drift:")),
-    Frame("DRIFT-02", 3, "A23",
+    Frame("DRIFT-02", 3, "A26",
           "drift with an identical cloud exits 0",
           files={"groups/web.yaml": _group(members=()),
                  "snapshot.json": _snapshot()},
           cloud={"sgs": [{"id": "sg-web", "name": "web", "description": ""}]},
           argv=["drift", "--snapshot", "snapshot.json"], expect_rc=0,
           expect_out=("no drift",)),
-    Frame("DRIFT-03", 3, "A23",
+    Frame("DRIFT-03", 3, "A26",
           "drift --json emits the liquibase-shaped diff",
           files={"groups/web.yaml": _group(members=()),
                  "snapshot.json": _snapshot()},
@@ -1287,6 +1296,93 @@ FRAMES: list = [
           argv=["drift", "--json"], expect_rc=1,      # auto snapshot.json
           expect_out=('"diff"', '"missingObjects"',
                       '"unexpectedObjects"', '"changedObjects"')),
+
+    # ================= A27 reverse import (hcs-sg import) =================
+    Frame("IMP-01", 2, "A27",
+          "import maps sgs/rules/members to entities; self rules implicit",
+          cloud={"sgs": [{"id": "sg-web", "name": "web", "description": "d"},
+                         {"id": "sg-db", "name": "db"}],
+                 "rules": [
+                     {"id": "r1", "sg": "sg-web", "direction": "ingress",
+                      "protocol": "tcp", "ports": "22",
+                      "prefix": "203.0.113.0/24"},
+                     {"id": "r2", "sg": "sg-web", "direction": "ingress",
+                      "protocol": "icmp", "rgid": "sg-web"},      # self
+                     {"id": "r3", "sg": "sg-db", "direction": "egress",
+                      "protocol": None, "rgid": "sg-web"}],       # group ref
+                 "nics": [{"port_id": "p1", "ip": "10.0.1.10"}],
+                 "attached": [["sg-web", "p1"]]},
+          usecase="import",
+          expect_value={"groups": ["db", "web"],
+                        "members": {"web": ("10.0.1.10",)},
+                        "rules": {
+                            "web": [("ingress", "tcp", "22",
+                                     ("cidr", "203.0.113.0/24"))],
+                            "db": [("egress", "all", None,
+                                    ("group", "web"))]},
+                        "notes": ("self-referential",)}),
+    Frame("IMP-02", 2, "A27",
+          "duplicate cloud names: first id kept, loser skipped, rules "
+          "referencing the loser by id skipped too",
+          cloud={"sgs": [{"id": "sg-a", "name": "dup"},
+                         {"id": "sg-b", "name": "dup"},
+                         {"id": "sg-c", "name": "app"}],
+                 "rules": [
+                     {"id": "r9", "sg": "sg-c", "direction": "ingress",
+                      "protocol": "tcp", "ports": "80", "rgid": "sg-b"}]},
+          usecase="import",
+          expect_value={"groups": ["app", "dup"],       # first dup id kept
+                        "rules": {"app": [], "dup": []},
+                        "notes": ("duplicate cloud name", "cannot be imported")}),
+    Frame("IMP-03", 2, "A27",
+          "unrepresentable name and IPv6 remote are skipped with notes",
+          cloud={"sgs": [{"id": "sg-x", "name": "Web_UK"},
+                         {"id": "sg-y", "name": "ok"}],
+                 "rules": [
+                     {"id": "r1", "sg": "sg-y", "direction": "egress",
+                      "protocol": None, "prefix": "::/0"}]},
+          usecase="import",
+          expect_value={"groups": ["ok"],
+                        "rules": {"ok": []},
+                        "notes": ("cannot become a config file",
+                                  "not a v4 CIDR")}),
+    Frame("IMP-04", 3, "A27",
+          "import writes groups/ and rules/ from snapshot.json, offline",
+          files={"snapshot.json": _snapshot(
+              rules=({"id": "r1", "sg": "sg-web", "direction": "ingress",
+                      "protocol": "tcp", "ports": "22",
+                      "prefix": "203.0.113.0/24"},
+                     {"id": "r2", "sg": "sg-web", "direction": "ingress",
+                      "protocol": "icmp", "rgid": "sg-web"}),
+              attached=(("sg-web", "p1", "10.0.1.10"),))},
+          argv=["import"], inject_gateway=False, expect_rc=0,
+          expect_out=("import: 1 groups, 1 rules", "note:",
+                      "self-referential", "now managed"),
+          expect_files=("groups/web.yaml", "rules/web.yaml")),
+    Frame("IMP-05", 3, "A27",
+          "import without a snapshot fails with guidance",
+          argv=["import", "--snapshot", "nope.json"],
+          inject_gateway=False, expect_rc=1,
+          expect_err=("needs a snapshot",)),
+    Frame("IMP-06", 3, "A27",
+          "import refuses to overwrite existing files without --force",
+          files={"groups/web.yaml": _group(members=()),
+                 "snapshot.json": _snapshot()},
+          argv=["import"], inject_gateway=False, expect_rc=1,
+          expect_err=("refusing to overwrite", "groups/web.yaml")),
+    Frame("IMP-07", 3, "A27",
+          "import --force overwrites the existing files",
+          files={"groups/web.yaml": _group(members=()),
+                 "snapshot.json": _snapshot()},
+          argv=["import", "--force"], inject_gateway=False, expect_rc=0,
+          expect_out=("import: 1 groups",),
+          expect_files=("groups/web.yaml",)),
+    Frame("IMP-08", 3, "A27",
+          "import --json lists imported groups, files and notes",
+          files={"snapshot.json": _snapshot()},
+          argv=["import", "--json"], inject_gateway=False, expect_rc=0,
+          expect_json={"imported": ["web"]},
+          expect_files=("groups/web.yaml", "rules/web.yaml")),
 ]
 
 TIER1 = [f for f in FRAMES if f.tier == 1]
