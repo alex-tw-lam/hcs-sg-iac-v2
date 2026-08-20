@@ -25,6 +25,7 @@ ADAPTER_THIRD_PARTY = {
     "ratelimit.py": set(),
     "fake_gateway.py": set(),
     "audit.py": set(),
+    "snapshot_gateway.py": set(),
     "__init__.py": set(),
 }
 ALLOWED_INTERNAL = {"hcs_sg_iac"}

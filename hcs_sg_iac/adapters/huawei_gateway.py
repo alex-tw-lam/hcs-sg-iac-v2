@@ -28,6 +28,7 @@ from huaweicloudsdkvpc.v2 import (CreateSecurityGroupOption,
                                   NeutronCreateSecurityGroupRuleRequestBody,
                                   NeutronDeleteSecurityGroupRuleRequest,
                                   NeutronListSecurityGroupRulesRequest,
+                                  NeutronListSecurityGroupsRequest,
                                   NeutronSecurityGroupRule,
                                   NeutronUpdateSecurityGroupOption,
                                   NeutronUpdateSecurityGroupRequest,
@@ -36,7 +37,7 @@ from huaweicloudsdkvpc.v2 import (CreateSecurityGroupOption,
                                   UpdatePortRequest, VpcClient)
 
 from hcs_sg_iac.adapters.ratelimit import FixedWindowLimiter
-from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg
+from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg, Snapshot
 from hcs_sg_iac.model.entities import Rule
 from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.model.portset import parse_ports
@@ -54,13 +55,17 @@ _PORT_PAGE = 200
 
 # Client-method dispatch: request class name → VpcClient method name.
 # Verified against the installed SDK: Neutron request classes pair with
-# the neutron_* client methods (the /v2.0 endpoints the sibling service
-# uses); the similarly-named native methods hit /v1 endpoints and take
-# different request types. tests/adapters/test_huawei_translate.py
+# the neutron_* client methods (the /v2.0 endpoints); the native methods
+# hit /v1 endpoints and take different request types. Every URI below
+# cross-checked against the HCS 8.5.1 VPC API Reference (Issue 04 PDF,
+# 585pp): all ten are documented for the private cloud — the v1 paths
+# appear there with {tenant_id} placeholders, which BasicCredentials
+# fills with the project id. tests/adapters/test_huawei_translate.py
 # asserts every target exists on VpcClient.
 _METHODS = {
     "ListSecurityGroupsRequest": "list_security_groups",
     "CreateSecurityGroupRequest": "create_security_group",
+    "NeutronListSecurityGroupsRequest": "neutron_list_security_groups",
     "NeutronUpdateSecurityGroupRequest": "neutron_update_security_group",
     "DeleteSecurityGroupRequest": "delete_security_group",
     "NeutronListSecurityGroupRulesRequest": "neutron_list_security_group_rules",
@@ -99,18 +104,22 @@ class HuaweiGateway:
         self._sdk = sdk
         self._limiter = limiter
         self._sg_name_to_id = {}      # cache for remote-group resolution
+        self._recent_calls: list = []  # capped method-name trail; travels
+        # on rate errors so the exact call sequence that hit the 429 is
+        # visible in the one-line error (and the audit record)
 
     def quota_snapshot(self) -> dict:
         return self._limiter.snapshot()
 
     def _run(self, request):
         if not self._limiter.try_acquire():
-            _log.warning("budget exhausted; %s", self._limiter.snapshot())
-            raise QuotaExhausted("service call budget exhausted for this "
-                                 f"window; snapshot={self._limiter.snapshot()}",
-                                 retry_at=self._limiter.snapshot()
-                                         ["window_resets_at"])
+            raise QuotaExhausted(
+                "service call budget exhausted for this window; last "
+                f"calls: {', '.join(self._recent_calls[-20:])}",
+                retry_at=self._limiter.snapshot()["window_resets_at"])
         method_name = _METHODS[type(request).__name__]
+        self._recent_calls.append(method_name)
+        del self._recent_calls[:-50]              # cap the trail
         method = getattr(self._sdk, method_name)
         try:
             resp = method(request)
@@ -124,10 +133,11 @@ class HuaweiGateway:
                 _log.warning("cloud throttle %s — our limit now %s",
                              e.error_code,
                              self._limiter.snapshot()["effective_limit"])
-                raise CloudThrottled(f"cloud throttled: {e.error_code} "
-                                     f"{e.error_msg}",
-                                     retry_at=self._limiter.snapshot()
-                                             ["window_resets_at"]) from e
+                raise CloudThrottled(
+                    f"cloud throttled: {e.error_code} {e.error_msg}; "
+                    f"calls before throttle: "
+                    f"{', '.join(self._recent_calls[-20:])}",
+                    retry_at=self._limiter.snapshot()["window_resets_at"]) from e
             raise CloudError(f"{e.status_code}: {e.error_code} {e.error_msg}") from e
         except SdkException as e:
             raise CloudError(str(e)) from e
@@ -163,6 +173,46 @@ class HuaweiGateway:
             lambda marker: NeutronListSecurityGroupRulesRequest(
                 security_group_id=sg_id, limit=_RULE_PAGE, marker=marker),
             "security_group_rules", _RULE_PAGE, self._to_cloud_rule)
+
+    def inventory(self) -> "tuple[Snapshot, dict]":
+        """The WHOLE account in two paged call families (the big rate
+        saver): neutron_list_security_groups embeds each SG's rules, and
+        one unfiltered list_ports yields membership (port.security_
+        groups) plus the IP→NIC index (fixed_ips/dns_assignment) —
+        replacing the 1 + 2N (+ per-100-IP) reads of the fallback."""
+        sgs, rules = [], {}
+        attached: dict = {}
+        nics_by_ip: dict = {}
+
+        def to_sg_with_rules(sg):
+            sgs.append(CloudSg(id=sg.id, name=sg.name,
+                               description=sg.description or ""))
+            self._sg_name_to_id[sg.name] = sg.id
+            rules[sg.id] = [self._to_cloud_rule(r, sg_id=sg.id)
+                            for r in (sg.security_group_rules or [])]
+
+        def to_port(p):
+            ips = [f.ip_address for f in (p.fixed_ips or [])]
+            nic = CloudNic(port_id=p.id, ip=ips[0] if ips else "",
+                           vm_name=_vm_name(p))
+            for sg_id in (p.security_groups or []):
+                attached.setdefault(sg_id, []).append(nic)
+            for ip in ips:
+                if "." in ip:              # IPv4 only — model is v4-only
+                    nics_by_ip.setdefault(ip, []).append(nic)
+
+        self._paged(
+            lambda marker: NeutronListSecurityGroupsRequest(
+                limit=_SG_PAGE, marker=marker),
+            "security_groups", _SG_PAGE, to_sg_with_rules)
+        self._paged(
+            lambda marker: ListPortsRequest(limit=_PORT_PAGE, marker=marker),
+            "ports", _PORT_PAGE, to_port)
+        for sg in sgs:          # read_snapshot invariant: every sg keyed
+            rules.setdefault(sg.id, [])
+            attached.setdefault(sg.id, [])
+        return Snapshot(sgs=tuple(sgs), rules=rules, attached=attached), \
+            nics_by_ip
 
     # -- MembershipReader --
     def find_nics_by_ip(self, ips: list) -> dict:
@@ -273,7 +323,10 @@ class HuaweiGateway:
                                         UpdatePortOption(security_groups=
                                                          security_groups))))
 
-    def _to_cloud_rule(self, r: NeutronSecurityGroupRule) -> CloudRule:
+    def _to_cloud_rule(self, r: NeutronSecurityGroupRule,
+                       sg_id: "str | None" = None) -> CloudRule:
+        # sg_id: the parent SG for embedded rules (their JSON form does
+        # not carry security_group_id); None = standalone listing.
         protocol = getattr(r, "protocol", None) or None
         lo = getattr(r, "port_range_min", None)
         hi = getattr(r, "port_range_max", None)
@@ -286,7 +339,7 @@ class HuaweiGateway:
             ports = parse_ports(f"{lo}-{hi}")
         else:
             ports = str(lo) if lo is not None else None
-        return CloudRule(id=r.id, sg_id=r.security_group_id,
+        return CloudRule(id=r.id, sg_id=sg_id or r.security_group_id,
                          direction=r.direction, protocol=protocol,
                          ports=ports,
                          remote_group_id=getattr(r, "remote_group_id", None),

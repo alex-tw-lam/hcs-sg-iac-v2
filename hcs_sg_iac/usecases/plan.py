@@ -25,7 +25,12 @@ def _q(s: str) -> str:
 
 
 def read_snapshot(sg_reader, membership_reader) -> Snapshot:
-    """Assemble the cloud snapshot via the reader protocols."""
+    """Assemble the cloud snapshot via the reader protocols. Gateways
+    able to fetch SGs-with-embedded-rules + ports in one pass expose
+    inventory(); the per-SG loop below is the protocol-level fallback
+    (fake gateway, any future adapter)."""
+    if hasattr(sg_reader, "inventory"):
+        return sg_reader.inventory()[0]
     sgs = tuple(sg_reader.list_security_groups())
     rules, attached = {}, {}
     for sg in sgs:

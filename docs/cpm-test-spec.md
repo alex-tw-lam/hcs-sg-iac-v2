@@ -52,7 +52,7 @@ loader/usecase/adapter · **T3** cli-e2e · **T4** cloud-contract
 | credentials | all set · ≥1 missing (of AK/SK/PROJECT_ID/ENDPOINT) |
 | subcommand | validate · plan · apply · destroy · none (usage) |
 | `--project` | explicit · default `"."` · nonexistent |
-| `--json` / `--yes` / `--verbose` | absent/present |
+| `--json` / `--yes` / `--verbose` / `--snapshot FILE` | absent/present |
 | stdin (apply) | `yes` · `no` · `YES` · EOF · KeyboardInterrupt |
 | stdin (destroy) | exact name · wrong name · EOF |
 | destroy target | cloud SG exists · unknown |

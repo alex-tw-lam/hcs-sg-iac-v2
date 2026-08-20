@@ -147,6 +147,15 @@ itself) are preserved: they participate in matching (a coded
 self-reference converges against them) but are never stale — not even
 a managed `[]` direction strips them.
 
+Inventory (`hcs-sg snapshot`) costs `1 + 2N` calls (SG list, then rules
++ members per SG; +1 per 100 member IPs for NIC resolution) and can be
+replayed offline: `plan/apply/destroy --snapshot FILE` resolve and plan
+against the file with ZERO cloud reads and no credentials (writes still
+need the real cloud). Snapshots are point-in-time artifacts, never
+auto-updated after writes; `drift --snapshot FILE` diffs the live cloud
+against the file, keyed by cloud IDs (duplicate names safe), rc 1 on
+any drift. Rate errors carry the recent-call trail so the exact call
+sequence that hit a 429 is visible in the error line.
 Apply is sequential, resumable and idempotent, and only ever runs under
 `--yes` (without it, `apply`/`destroy` are dry runs): every cloud write goes through
 the fixed-window rate limiter (same shared 90 calls / 5 min cloud quota as the
@@ -172,8 +181,10 @@ swappable by design). Synchronous SDK client (a CLI has no concurrency need).
 ```
 hcs-sg validate [--project DIR] [--json]
 hcs-sg plan     [--project DIR] [--json]
-hcs-sg apply    [--project DIR] [--json] [--yes] [--verbose]
-hcs-sg destroy  <name> [--project DIR] [--json] [--yes] [--verbose]
+hcs-sg apply    [--project DIR] [--json] [--yes] [--verbose] [--snapshot FILE]
+hcs-sg destroy  <name> [--project DIR] [--json] [--yes] [--verbose] [--snapshot FILE]
+hcs-sg snapshot [--project DIR] [--json] [--out snapshot.json]
+hcs-sg drift    --snapshot FILE [--project DIR]
 ```
 
 - Credentials/config from environment (`HCS_AK`, `HCS_SK`,
