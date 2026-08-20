@@ -1,6 +1,6 @@
 [project]
 name = "hcs-sg-iac"
-version = "0.5.0"
+version = "0.6.0"
 description = "Security-group-as-code CLI for HCS 8.5.1 (validate / plan / apply, dry-run by default)"
 requires-python = ">=3.11"
 dependencies = [

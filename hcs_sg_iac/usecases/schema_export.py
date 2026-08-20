@@ -70,15 +70,16 @@ def _direction(remote_key: str) -> dict:
 
 
 def group_file_schema() -> dict:
-    """Schema of one groups/<name>.yaml document."""
+    """Schema of one security-groups/<name>/group.yaml document."""
     return {
         "$schema": _DRAFT,
         "$id": "https://hcs-sg.local/schemas/group-file.schema.json",
         "title": "hcs-sg group file",
-        "$comment": "groups/<name>.yaml — the file's name stem must equal "
-        "`name`; duplicate member IPs within a group are "
-        "rejected at load time; extra keys in member entries "
-        "are tolerated (reserved for future nic:/vm: types).",
+        "$comment": "security-groups/<name>/group.yaml — the directory "
+        "name must equal `name`; duplicate member IPs within "
+        "a group are rejected at load time; extra keys in "
+        "member entries are tolerated (reserved for future "
+        "nic:/vm: types).",
         "type": "object",
         "required": ["name"],
         "properties": {
@@ -103,34 +104,34 @@ def group_file_schema() -> dict:
     }
 
 
-def rules_file_schema() -> dict:
-    """Schema of one rules/<name>.yaml document."""
+def direction_file_schema(direction: str) -> dict:
+    """Schema of one security-groups/<name>/<direction>.yaml document
+    (a bare list of rules)."""
+    remote_key = "source" if direction == "ingress" else "destination"
     return {
         "$schema": _DRAFT,
-        "$id": "https://hcs-sg.local/schemas/rules-file.schema.json",
-        "title": "hcs-sg rules file",
-        "$comment": "rules/<name>.yaml — the file's name stem must equal "
-        "`security_group`, which must have a groups/<name>.yaml; "
-        "remote group references must point at existing groups "
+        "$id": f"https://hcs-sg.local/schemas/{direction}-file.schema.json",
+        "title": f"hcs-sg {direction} rules file",
+        "$comment": f"security-groups/<name>/{direction}.yaml — a bare "
+        "list; an ABSENT file = the direction is unmanaged, "
+        "[] = remove all rules in it; the sibling group.yaml "
+        "must exist with the same directory name; remote "
+        "group references must point at existing groups "
         "(cross-file, validated at load/plan time).",
-        "type": "object",
-        "required": ["security_group"],
-        "properties": {
-            "security_group": {
-                "type": "string",
-                "pattern": GROUP_NAME_RE.pattern,
-            },
-            "ingress": _direction("source"),
-            "egress": _direction("destination"),
-        },
+        **_direction(remote_key),
     }
 
 
 def dumps(which: str = "all") -> str:
-    """Render one schema (group|rules) or both (all) as JSON text."""
-    one = {"group": group_file_schema(), "rules": rules_file_schema()}
+    """Render one schema (group|ingress|egress) or all as JSON text."""
+    one = {
+        "group": group_file_schema(),
+        "ingress": direction_file_schema("ingress"),
+        "egress": direction_file_schema("egress"),
+    }
     schema = one.get(which) or {
         "group_file": one["group"],
-        "rules_file": one["rules"],
+        "ingress_file": one["ingress"],
+        "egress_file": one["egress"],
     }
     return json.dumps(schema, indent=2)

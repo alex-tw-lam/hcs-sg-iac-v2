@@ -80,35 +80,37 @@ def _group(name="web", desc=None, members=("10.0.1.10",)):
     return "\n".join(lines) + "\n"
 
 
-def _rules(sg="web", ingress=(), egress=(), null=(), empty=()):
-    """Rules file text. Per direction: `null` renders "key: null" (the
-    remove-all guidance error), `empty` renders "key: []" (managed
-    remove-all), a non-empty tuple renders the rows, otherwise the key
-    is absent (unmanaged). Rows are (remote, protocol, ports-yaml)
-    triples; ports None = key absent."""
-    lines = [f"security_group: {sg}"]
+def _rulefiles(sg="web", ingress=(), egress=(), null=(), empty=()):
+    """Per-SG direction files: security-groups/<sg>/(ingress|egress).yaml.
+    An absent direction = NO file (unmanaged); a name in `null` renders
+    an empty document (the remove-all guidance error); `empty` renders
+    []; rows are (remote, protocol, ports-yaml) triples; ports None =
+    key absent."""
+    files = {}
     for key, rows in (("ingress", ingress), ("egress", egress)):
+        path = f"security-groups/{sg}/{key}.yaml"
         rk = "source" if key == "ingress" else "destination"
         if key in null:
-            lines.append(f"{key}: null")
-            continue
-        if key in empty:
-            lines.append(f"{key}: []")
-            continue
-        if not rows:
-            continue
-        lines.append(f"{key}:")
-        for remote, protocol, ports in rows:
-            parts = [f"{rk}: {remote}", f"protocol: {protocol}"]
-            if ports is not None:
-                parts.append(f"ports: {ports}")
-            lines.append("  - {" + ", ".join(parts) + "}")
-    return "\n".join(lines) + "\n"
+            files[path] = ""
+        elif key in empty:
+            files[path] = "[]\n"
+        elif rows:
+            lines = [
+                "- {"
+                + ", ".join(
+                    [f"{rk}: {remote}", f"protocol: {protocol}"]
+                    + ([f"ports: {ports}"] if ports is not None else [])
+                )
+                + "}"
+                for remote, protocol, ports in rows
+            ]
+            files[path] = "\n".join(lines) + "\n"
+    return files
 
 
 def _cli(**kw) -> dict:
     """Tier-3 shorthand: the standard one-group project + one NIC."""
-    kw.setdefault("files", {"groups/web.yaml": _group()})
+    kw.setdefault("files", {"security-groups/web/group.yaml": _group()})
     kw.setdefault("cloud", {"nics": [{"port_id": "p1", "ip": "10.0.1.10"}]})
     return kw
 
@@ -259,47 +261,6 @@ FRAMES: list = [
     ),
     # ================= T1 backlog: A5 security_group field =================
     Frame(
-        "SGF-02",
-        1,
-        "A5",
-        "absent security_group fails the charset check",
-        model_call="parse_rules_file",
-        model_input={"ingress": []},
-        expect_ok=False,
-        expect_error_contains=("security_group None must match",),
-    ),
-    Frame(
-        "SGF-02.a",
-        1,
-        "A5",
-        "empty-string security_group is rejected",
-        model_call="parse_rules_file",
-        model_input={"security_group": "", "ingress": []},
-        expect_ok=False,
-        expect_error_contains=("security_group '' must match",),
-    ),
-    Frame(
-        "SGF-02.b",
-        1,
-        "A5",
-        "non-string security_group is rejected",
-        model_call="parse_rules_file",
-        model_input={"security_group": 42, "ingress": []},
-        expect_ok=False,
-        expect_error_contains=("security_group 42 must match",),
-    ),
-    Frame(
-        "SGF-02.c",
-        1,
-        "A5",
-        "uppercase security_group is rejected",
-        model_call="parse_rules_file",
-        model_input={"security_group": "Web", "ingress": []},
-        expect_ok=False,
-        expect_error_contains=("must match",),
-    ),
-    # ================= T1 backlog: A6 direction section =================
-    Frame(
         "SECT-04.a",
         1,
         "A6",
@@ -307,7 +268,7 @@ FRAMES: list = [
         model_call="parse_rules_file",
         model_input={"security_group": "x", "egress": None},
         expect_ok=False,
-        expect_error_contains=("egress must be a list", "remove-all"),
+        expect_error_contains=("egress file is empty", "remove-all"),
     ),
     Frame(
         "SECT-05",
@@ -317,7 +278,7 @@ FRAMES: list = [
         model_call="parse_rules_file",
         model_input={"security_group": "x", "ingress": "80"},
         expect_ok=False,
-        expect_error_contains=("ingress must be a list",),
+        expect_error_contains=("ingress file must be a list",),
     ),
     Frame(
         "SECT-06",
@@ -605,7 +566,7 @@ FRAMES: list = [
         "A12",
         "empty project (no yaml) loads ok",
         usecase="load",
-        files={"groups/.keep": ""},
+        files={"security-groups/.keep": ""},
         expect_ok=True,
         expect_value={"groups": [], "rules": []},
     ),
@@ -615,7 +576,7 @@ FRAMES: list = [
         "A12",
         "null document is a load error",
         usecase="load",
-        files={"groups/x.yaml": "null\n"},
+        files={"security-groups/x/group.yaml": "null\n"},
         expect_ok=False,
         expect_error_contains=("empty",),
     ),
@@ -625,7 +586,7 @@ FRAMES: list = [
         "A12",
         "list document is not a mapping",
         usecase="load",
-        files={"groups/x.yaml": "- a\n- b\n"},
+        files={"security-groups/x/group.yaml": "- a\n- b\n"},
         expect_ok=False,
         expect_error_contains=("must be a YAML mapping",),
     ),
@@ -633,14 +594,14 @@ FRAMES: list = [
         "STORE-06.a",
         2,
         "A12",
-        ".yml sibling in rules/ warns too",
+        ".yml sibling inside an SG directory warns too",
         usecase="load",
         files={
-            "groups/web.yaml": _group(members=()),
-            "rules/extra.yml": "security_group: web\n",
+            "security-groups/web/group.yaml": _group(members=()),
+            "security-groups/web/extra.yml": "[]\n",
         },
         expect_ok=True,
-        expect_warn=("rules/extra.yml",),
+        expect_warn=("security-groups/web/extra.yml",),
     ),
     Frame(
         "STORE-11",
@@ -649,8 +610,8 @@ FRAMES: list = [
         "several bad files accumulate errors",
         usecase="load",
         files={
-            "groups/bad.yaml": "name: bad\n  members: [\n",
-            "groups/other.yaml": "name: Web\nmembers: []\n",
+            "security-groups/bad/group.yaml": "name: bad\n  members: [\n",
+            "security-groups/other/group.yaml": "name: Web\nmembers: []\n",
         },
         expect_ok=False,
         expect_error_contains=("YAML syntax error", "must match"),
@@ -663,8 +624,8 @@ FRAMES: list = [
         "vm-known multi-match lists candidates and drops overlap info",
         usecase="resolve",
         files={
-            "groups/web.yaml": _group(name="web"),
-            "groups/mon.yaml": _group(name="mon"),
+            "security-groups/web/group.yaml": _group(name="web"),
+            "security-groups/mon/group.yaml": _group(name="mon"),
         },
         cloud={
             "nics": [
@@ -684,9 +645,9 @@ FRAMES: list = [
         "cloud remote_group_id maps to the peer group's name",
         usecase="plan",
         files={
-            "groups/web.yaml": _group(members=()),
-            "groups/peer.yaml": _group(name="peer", members=()),
-            "rules/web.yaml": _rules(ingress=[("peer", "tcp", '"80"')]),
+            "security-groups/web/group.yaml": _group(members=()),
+            "security-groups/peer/group.yaml": _group(name="peer", members=()),
+            **_rulefiles(ingress=[("peer", "tcp", '"80"')]),
         },
         cloud={
             "sgs": [
@@ -713,7 +674,7 @@ FRAMES: list = [
         "A18",
         "attached-but-undesired member is detached, missing one attached",
         usecase="plan",
-        files={"groups/web.yaml": _group()},
+        files={"security-groups/web/group.yaml": _group()},
         cloud={
             "sgs": [{"id": "sg-web", "name": "web"}],
             "nics": [
@@ -735,8 +696,8 @@ FRAMES: list = [
         "icmp rule plans with the all-ports literal",
         usecase="plan",
         files={
-            "groups/web.yaml": _group(members=()),
-            "rules/web.yaml": _rules(ingress=[("0.0.0.0/0", "icmp", None)]),
+            "security-groups/web/group.yaml": _group(members=()),
+            **_rulefiles(ingress=[("0.0.0.0/0", "icmp", None)]),
         },
         expect_actions=(
             ("+", "group", "web"),
@@ -751,7 +712,7 @@ FRAMES: list = [
         "A19",
         "budget 0 throttles everything",
         usecase="execute",
-        files={"groups/web.yaml": _group()},
+        files={"security-groups/web/group.yaml": _group()},
         cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}], "budget": 0},
         expect_results=("throttled", "throttled"),
         expect_cloud=(("sg_missing", "web"),),
@@ -763,10 +724,8 @@ FRAMES: list = [
         "mid-action failure isolates and skips dependents",
         usecase="execute",
         files={
-            "groups/boom.yaml": _group(name="boom"),
-            "rules/boom.yaml": _rules(
-                sg="boom", ingress=[("0.0.0.0/0", "tcp", '"22"')]
-            ),
+            "security-groups/boom/group.yaml": _group(name="boom"),
+            **_rulefiles(sg="boom", ingress=[("0.0.0.0/0", "tcp", '"22"')]),
         },
         cloud={
             "nics": [{"port_id": "p1", "ip": "10.0.1.10"}],
@@ -790,10 +749,8 @@ FRAMES: list = [
         "(unlike CloudError it is never a hard failure)",
         usecase="execute",
         files={
-            "groups/boom.yaml": _group(name="boom"),
-            "rules/boom.yaml": _rules(
-                sg="boom", ingress=[("0.0.0.0/0", "tcp", '"22"')]
-            ),
+            "security-groups/boom/group.yaml": _group(name="boom"),
+            **_rulefiles(sg="boom", ingress=[("0.0.0.0/0", "tcp", '"22"')]),
         },
         cloud={
             "nics": [{"port_id": "p1", "ip": "10.0.1.10"}],
@@ -876,8 +833,8 @@ FRAMES: list = [
         "A20",
         "validate OK line carries the rule count",
         files={
-            "groups/web.yaml": _group(members=()),
-            "rules/web.yaml": _rules(ingress=[("0.0.0.0/0", "tcp", '"22"')]),
+            "security-groups/web/group.yaml": _group(members=()),
+            **_rulefiles(ingress=[("0.0.0.0/0", "tcp", '"22"')]),
         },
         argv=["validate"],
         expect_rc=0,
@@ -900,7 +857,7 @@ FRAMES: list = [
         3,
         "A21",
         "destroy --json renders the teardown plan",
-        files={"groups/web.yaml": _group(members=())},
+        files={"security-groups/web/group.yaml": _group(members=())},
         cloud={"sgs": [{"id": "sg-1", "name": "web"}]},
         argv=["destroy", "web", "--json"],
         expect_rc=0,
@@ -994,11 +951,11 @@ FRAMES: list = [
         3,
         "A20",
         "nonexistent --project fails cleanly",
-        files={"groups/web.yaml": _group()},
+        files={"security-groups/web/group.yaml": _group()},
         argv=["plan", "--project", "no-such-project-dir"],
         raw_argv=True,
         expect_rc=1,
-        expect_err=("no groups/ directory",),
+        expect_err=("no security-groups/ directory",),
     ),
     # ============ T1 remainder (breadth over covered behaviour) ============
     Frame(
@@ -1279,7 +1236,7 @@ FRAMES: list = [
         model_call="parse_rules_file",
         model_input={"security_group": "x", "ingress": None},
         expect_ok=False,
-        expect_error_contains=("ingress must be a list", "remove-all"),
+        expect_error_contains=("ingress file is empty", "remove-all"),
     ),
     Frame(
         "REMOTE-01",
@@ -1727,10 +1684,8 @@ FRAMES: list = [
         "happy path loads both directories",
         usecase="load",
         files={
-            "groups/web-tier.yaml": _group(name="web-tier"),
-            "rules/web-tier.yaml": _rules(
-                sg="web-tier", ingress=[("bastion", "tcp", '"22"')]
-            ),
+            "security-groups/web-tier/group.yaml": _group(name="web-tier"),
+            **_rulefiles(sg="web-tier", ingress=[("bastion", "tcp", '"22"')]),
         },
         expect_ok=True,
         expect_value={"groups": ["web-tier"], "rules": ["web-tier"]},
@@ -1741,7 +1696,7 @@ FRAMES: list = [
         "A12",
         "empty file is a load error",
         usecase="load",
-        files={"groups/x.yaml": ""},
+        files={"security-groups/x/group.yaml": ""},
         expect_ok=False,
         expect_error_contains=("empty",),
     ),
@@ -1751,7 +1706,7 @@ FRAMES: list = [
         "A12",
         "scalar document is not a mapping",
         usecase="load",
-        files={"groups/x.yaml": "hello\n"},
+        files={"security-groups/x/group.yaml": "hello\n"},
         expect_ok=False,
         expect_error_contains=("must be a YAML mapping",),
     ),
@@ -1761,7 +1716,7 @@ FRAMES: list = [
         "A12",
         "syntax errors carry the parser's line",
         usecase="load",
-        files={"groups/bad.yaml": "name: bad\n  members: [\n"},
+        files={"security-groups/bad/group.yaml": "name: bad\n  members: [\n"},
         expect_ok=False,
         expect_error_contains=("YAML syntax error", "line 2"),
     ),
@@ -1771,7 +1726,7 @@ FRAMES: list = [
         "A12",
         "binary bytes are a read error",
         usecase="load",
-        files={"groups/x.yaml": b"\xff\xfe\x00garbage"},
+        files={"security-groups/x/group.yaml": b"\xff\xfe\x00garbage"},
         expect_ok=False,
         expect_error_contains=("cannot read file",),
     ),
@@ -1782,74 +1737,11 @@ FRAMES: list = [
         ".yml sibling in groups/ warns",
         usecase="load",
         files={
-            "groups/web.yaml": _group(members=()),
-            "groups/extra.yml": "name: extra\nmembers: []\n",
+            "security-groups/web/group.yaml": _group(members=()),
+            "security-groups/extra.yml": "name: extra\nmembers: []\n",
         },
         expect_ok=True,
-        expect_warn=("groups/extra.yml",),
-    ),
-    Frame(
-        "STORE-07",
-        2,
-        "A12",
-        "group stem must equal the declared name",
-        usecase="load",
-        files={"groups/oops.yaml": _group(name="web-tier", members=())},
-        expect_ok=False,
-        expect_error_contains=("filename must equal group name",),
-    ),
-    Frame(
-        "STORE-08",
-        2,
-        "A12",
-        "rules stem must equal security_group",
-        usecase="load",
-        files={
-            "groups/web.yaml": _group(members=()),
-            "rules/oops.yaml": _rules(sg="web", ingress=[]),
-        },
-        expect_ok=False,
-        expect_error_contains=("filename must equal security_group",),
-    ),
-    Frame(
-        "STORE-09",
-        2,
-        "A12",
-        "two files declaring one group name",
-        usecase="load",
-        files={
-            "groups/a.yaml": _group(name="dup", members=()),
-            "groups/b.yaml": _group(name="dup", members=()),
-        },
-        expect_ok=False,
-        expect_error_contains=("duplicate group name",),
-    ),
-    Frame(
-        "STORE-10",
-        2,
-        "A12",
-        "two rules files for one security_group",
-        usecase="load",
-        files={
-            "groups/web.yaml": _group(members=()),
-            "rules/web.yaml": _rules(sg="web", ingress=[]),
-            "rules/copy.yaml": _rules(sg="web", ingress=[]),
-        },
-        expect_ok=False,
-        expect_error_contains=("duplicate rules file",),
-    ),
-    Frame(
-        "STORE-10.a",
-        2,
-        "A12",
-        "dangling rules file (no group file)",
-        usecase="load",
-        files={
-            "groups/web.yaml": _group(members=()),
-            "rules/ghost.yaml": _rules(sg="ghost", ingress=[]),
-        },
-        expect_ok=False,
-        expect_error_contains=("has no groups/ghost.yaml",),
+        expect_warn=("security-groups/extra.yml",),
     ),
     Frame(
         "XVAL-01",
@@ -1858,11 +1750,9 @@ FRAMES: list = [
         "valid cross-file references pass",
         usecase="validate",
         files={
-            "groups/web.yaml": _group(members=()),
-            "groups/db.yaml": _group(name="db", members=()),
-            "rules/db.yaml": _rules(
-                sg="db", ingress=[("web", "tcp", '"5432"')]
-            ),
+            "security-groups/web/group.yaml": _group(members=()),
+            "security-groups/db/group.yaml": _group(name="db", members=()),
+            **_rulefiles(sg="db", ingress=[("web", "tcp", '"5432"')]),
         },
         expect_ok=True,
     ),
@@ -1873,26 +1763,11 @@ FRAMES: list = [
         "remote group reference must exist",
         usecase="validate",
         files={
-            "groups/web.yaml": _group(members=()),
-            "rules/web.yaml": _rules(
-                sg="web", ingress=[("ghost", "tcp", '"80"')]
-            ),
+            "security-groups/web/group.yaml": _group(members=()),
+            **_rulefiles(sg="web", ingress=[("ghost", "tcp", '"80"')]),
         },
         expect_ok=False,
         expect_error_contains=("unknown group 'ghost'",),
-    ),
-    Frame(
-        "XVAL-03",
-        2,
-        "A13",
-        "orphan rules file is reported",
-        usecase="validate",
-        files={
-            "groups/web.yaml": _group(members=()),
-            "rules/ghost.yaml": _rules(sg="ghost", ingress=[]),
-        },
-        expect_ok=False,
-        expect_error_contains=("has no groups/ghost.yaml",),
     ),
     Frame(
         "RES-01",
@@ -1900,7 +1775,7 @@ FRAMES: list = [
         "A14",
         "exactly one NIC resolves the member",
         usecase="resolve",
-        files={"groups/web.yaml": _group()},
+        files={"security-groups/web/group.yaml": _group()},
         cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10", "vm": "web-01"}]},
         expect_ok=True,
         expect_nics=(("10.0.1.10", "p1"),),
@@ -1911,7 +1786,7 @@ FRAMES: list = [
         "A14",
         "zero NIC matches is an error",
         usecase="resolve",
-        files={"groups/web.yaml": _group()},
+        files={"security-groups/web/group.yaml": _group()},
         cloud={},
         expect_ok=False,
         expect_error_contains=("no NIC",),
@@ -1922,7 +1797,7 @@ FRAMES: list = [
         "A14",
         "multiple NIC matches list their candidates",
         usecase="resolve",
-        files={"groups/web.yaml": _group()},
+        files={"security-groups/web/group.yaml": _group()},
         cloud={
             "nics": [
                 {"port_id": "p1", "ip": "10.0.1.10"},
@@ -1939,8 +1814,8 @@ FRAMES: list = [
         "overlap across groups is info, not error",
         usecase="resolve",
         files={
-            "groups/web.yaml": _group(),
-            "groups/mon.yaml": _group(name="mon"),
+            "security-groups/web/group.yaml": _group(),
+            "security-groups/mon/group.yaml": _group(name="mon"),
         },
         cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}]},
         expect_ok=True,
@@ -1953,8 +1828,10 @@ FRAMES: list = [
         "mixed success and failure reports both",
         usecase="resolve",
         files={
-            "groups/web.yaml": _group(),
-            "groups/db.yaml": _group(name="db", members=("10.0.9.99",)),
+            "security-groups/web/group.yaml": _group(),
+            "security-groups/db/group.yaml": _group(
+                name="db", members=("10.0.9.99",)
+            ),
         },
         cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}]},
         expect_ok=False,
@@ -2158,8 +2035,8 @@ FRAMES: list = [
         "new group: sg create first, then member, then rules",
         usecase="plan",
         files={
-            "groups/fresh.yaml": _group(name="fresh"),
-            "rules/fresh.yaml": _rules(
+            "security-groups/fresh/group.yaml": _group(name="fresh"),
+            **_rulefiles(
                 sg="fresh",
                 ingress=[("203.0.113.0/24", "tcp", '"22"')],
                 egress=[("0.0.0.0/0", "tcp", '"443"')],
@@ -2180,7 +2057,7 @@ FRAMES: list = [
         "A15",
         "description drift is a change action",
         usecase="plan",
-        files={"groups/web.yaml": _group(desc="new desc")},
+        files={"security-groups/web/group.yaml": _group(desc="new desc")},
         cloud={
             "sgs": [{"id": "sg-web", "name": "web", "description": "old"}],
             "nics": [{"port_id": "p1", "ip": "10.0.1.10"}],
@@ -2195,10 +2072,12 @@ FRAMES: list = [
         "A15",
         "cloud SG without code is inventoried, kept",
         usecase="plan",
-        files={"groups/.keep": ""},
+        files={"security-groups/.keep": ""},
         cloud={"sgs": [{"id": "sg-x", "name": "extra"}]},
         expect_actions=(),
-        expect_unmanaged=("security group 'extra' (no groups/extra.yaml)",),
+        expect_unmanaged=(
+            "security group 'extra' (no security-groups/extra/)",
+        ),
     ),
     Frame(
         "PLAN-04",
@@ -2206,7 +2085,7 @@ FRAMES: list = [
         "A17",
         "no rules file: both directions unmanaged, with counts",
         usecase="plan",
-        files={"groups/y.yaml": _group(name="y", members=())},
+        files={"security-groups/y/group.yaml": _group(name="y", members=())},
         cloud={
             "sgs": [{"id": "sg-y", "name": "y"}],
             "rules": [
@@ -2241,10 +2120,8 @@ FRAMES: list = [
         "identity: cloud all-protocol + unset remote equals code all/any",
         usecase="plan",
         files={
-            "groups/eq.yaml": _group(name="eq", members=()),
-            "rules/eq.yaml": _rules(
-                sg="eq", egress=[("0.0.0.0/0", "all", None)]
-            ),
+            "security-groups/eq/group.yaml": _group(name="eq", members=()),
+            **_rulefiles(sg="eq", egress=[("0.0.0.0/0", "all", None)]),
         },
         cloud={
             "sgs": [{"id": "sg-eq", "name": "eq"}],
@@ -2270,10 +2147,8 @@ FRAMES: list = [
         "identity: non-canonical cloud CIDR converges",
         usecase="plan",
         files={
-            "groups/nc.yaml": _group(name="nc", members=()),
-            "rules/nc.yaml": _rules(
-                sg="nc", ingress=[("10.0.0.0/8", "tcp", '"80"')]
-            ),
+            "security-groups/nc/group.yaml": _group(name="nc", members=()),
+            **_rulefiles(sg="nc", ingress=[("10.0.0.0/8", "tcp", '"80"')]),
         },
         cloud={
             "sgs": [{"id": "sg-nc", "name": "nc"}],
@@ -2298,10 +2173,8 @@ FRAMES: list = [
         "changed rule is an honest minus/plus pair (no update op)",
         usecase="plan",
         files={
-            "groups/web.yaml": _group(members=()),
-            "rules/web.yaml": _rules(
-                sg="web", ingress=[("web", "tcp", '"8080"')]
-            ),
+            "security-groups/web/group.yaml": _group(members=()),
+            **_rulefiles(sg="web", ingress=[("web", "tcp", '"8080"')]),
         },
         cloud={
             "sgs": [{"id": "sg-web", "name": "web"}],
@@ -2329,10 +2202,8 @@ FRAMES: list = [
         "multi-port code rule converges against split cloud rules",
         usecase="plan",
         files={
-            "groups/m.yaml": _group(name="m", members=()),
-            "rules/m.yaml": _rules(
-                sg="m", ingress=[("10.0.0.0/8", "tcp", '"22,443"')]
-            ),
+            "security-groups/m/group.yaml": _group(name="m", members=()),
+            **_rulefiles(sg="m", ingress=[("10.0.0.0/8", "tcp", '"22,443"')]),
         },
         cloud={
             "sgs": [{"id": "sg-m", "name": "m"}],
@@ -2365,10 +2236,8 @@ FRAMES: list = [
         "partial multi-port cloud creates only the missing subrange",
         usecase="plan",
         files={
-            "groups/m.yaml": _group(name="m", members=()),
-            "rules/m.yaml": _rules(
-                sg="m", ingress=[("10.0.0.0/8", "tcp", '"22,443"')]
-            ),
+            "security-groups/m/group.yaml": _group(name="m", members=()),
+            **_rulefiles(sg="m", ingress=[("10.0.0.0/8", "tcp", '"22,443"')]),
         },
         cloud={
             "sgs": [{"id": "sg-m", "name": "m"}],
@@ -2393,8 +2262,8 @@ FRAMES: list = [
         "overlapping code rules create each subrange exactly once",
         usecase="plan",
         files={
-            "groups/x.yaml": _group(name="x", members=()),
-            "rules/x.yaml": _rules(
+            "security-groups/x/group.yaml": _group(name="x", members=()),
+            **_rulefiles(
                 sg="x",
                 ingress=[
                     ("0.0.0.0/0", "tcp", '"22,443"'),
@@ -2417,8 +2286,8 @@ FRAMES: list = [
         "unrepresentable cloud remote is an honest delete",
         usecase="plan",
         files={
-            "groups/v6.yaml": _group(name="v6", members=()),
-            "rules/v6.yaml": _rules(sg="v6", empty=("egress",)),
+            "security-groups/v6/group.yaml": _group(name="v6", members=()),
+            **_rulefiles(sg="v6", empty=("egress",)),
         },
         cloud={
             "sgs": [{"id": "sg-v6", "name": "v6"}],
@@ -2443,7 +2312,7 @@ FRAMES: list = [
         "A15",
         "duplicate cloud SG names abort planning with every id listed",
         usecase="plan",
-        files={"groups/web.yaml": _group(members=())},
+        files={"security-groups/web/group.yaml": _group(members=())},
         cloud={
             "sgs": [
                 {"id": "sg-a", "name": "web", "description": "d1"},
@@ -2463,8 +2332,8 @@ FRAMES: list = [
         "managed-empty direction with no cloud rules raises no alarm",
         usecase="plan",
         files={
-            "groups/web.yaml": _group(members=()),
-            "rules/web.yaml": _rules(sg="web", empty=("ingress", "egress")),
+            "security-groups/web/group.yaml": _group(members=()),
+            **_rulefiles(sg="web", empty=("ingress", "egress")),
         },
         cloud={"sgs": [{"id": "sg-web", "name": "web"}]},
         expect_actions=(),
@@ -2478,8 +2347,8 @@ FRAMES: list = [
         "auto self rules survive; true stale still converges",
         usecase="plan",
         files={
-            "groups/web.yaml": _group(members=()),
-            "rules/web.yaml": _rules(
+            "security-groups/web/group.yaml": _group(members=()),
+            **_rulefiles(
                 sg="web",
                 ingress=(("0.0.0.0/0", "tcp", "80"),),
                 empty=("egress",),
@@ -2526,7 +2395,7 @@ FRAMES: list = [
         "destroy detaches every member then deletes the SG",
         usecase="destroy",
         model_input="x",
-        files={"groups/x.yaml": _group(name="x", members=())},
+        files={"security-groups/x/group.yaml": _group(name="x", members=())},
         cloud={
             "sgs": [{"id": "sg-x", "name": "x"}],
             "nics": [
@@ -2554,9 +2423,9 @@ FRAMES: list = [
         "rank order creates referenced groups before remote rules",
         usecase="execute",
         files={
-            "groups/a.yaml": _group(name="a", members=()),
-            "groups/b.yaml": _group(name="b", members=()),
-            "rules/a.yaml": _rules(sg="a", ingress=[("b", "tcp", '"22"')]),
+            "security-groups/a/group.yaml": _group(name="a", members=()),
+            "security-groups/b/group.yaml": _group(name="b", members=()),
+            **_rulefiles(sg="a", ingress=[("b", "tcp", '"22"')]),
         },
         expect_results=("ok", "ok", "ok"),
         expect_call_log=["create_sg:a", "create_sg:b", "create_rule:id-0001"],
@@ -2575,7 +2444,7 @@ FRAMES: list = [
         "A19",
         "empty sg_id payloads substitute the just-created id",
         usecase="execute",
-        files={"groups/web.yaml": _group()},
+        files={"security-groups/web/group.yaml": _group()},
         cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}]},
         expect_results=("ok", "ok"),
         expect_audit=("web",),
@@ -2587,7 +2456,7 @@ FRAMES: list = [
         "A19",
         "budget 1 throttles the second write",
         usecase="execute",
-        files={"groups/web.yaml": _group()},
+        files={"security-groups/web/group.yaml": _group()},
         cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}], "budget": 1},
         expect_results=("ok", "throttled"),
         expect_cloud=(("sg_exists", "web"), ("detached", "sg-of:web", "p1")),
@@ -2600,12 +2469,12 @@ FRAMES: list = [
         usecase="execute_resume",
         model_input={"phases": [{"budget": 3}, {"budget": None}]},
         files={
-            "groups/alpha.yaml": _group(name="alpha"),
-            "groups/beta.yaml": _group(name="beta", members=()),
-            "rules/alpha.yaml": _rules(
+            "security-groups/alpha/group.yaml": _group(name="alpha"),
+            "security-groups/beta/group.yaml": _group(name="beta", members=()),
+            **_rulefiles(
                 sg="alpha", ingress=[("203.0.113.0/24", "tcp", '"22"')]
             ),
-            "rules/beta.yaml": _rules(
+            **_rulefiles(
                 sg="beta", ingress=[("203.0.113.0/24", "tcp", '"443"')]
             ),
         },
@@ -2623,11 +2492,9 @@ FRAMES: list = [
         usecase="render_plan",
         model_input={"quota": {"needed": 7, "left": 18}},
         files={
-            "groups/mon.yaml": _group(name="mon"),
-            "groups/web.yaml": _group(desc="b"),
-            "rules/web.yaml": _rules(
-                sg="web", ingress=[("10.0.0.0/8", "tcp", '"22"')]
-            ),
+            "security-groups/mon/group.yaml": _group(name="mon"),
+            "security-groups/web/group.yaml": _group(desc="b"),
+            **_rulefiles(sg="web", ingress=[("10.0.0.0/8", "tcp", '"22"')]),
         },
         cloud={
             "sgs": [
@@ -2669,7 +2536,7 @@ FRAMES: list = [
         "apply mode appends the RESULT column and completion footer",
         usecase="render_exec",
         model_input={"quota": {"needed": 2, "left": 23}},
-        files={"groups/web.yaml": _group()},
+        files={"security-groups/web/group.yaml": _group()},
         cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}]},
         expect_out=(
             "RESULT",
@@ -2684,7 +2551,7 @@ FRAMES: list = [
         "A21",
         "json shape: actions, summary, quota, info",
         usecase="render_json",
-        files={"groups/web.yaml": _group()},
+        files={"security-groups/web/group.yaml": _group()},
         cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}]},
         expect_json={
             "summary": {"add": 2, "change": 0, "destroy": 0},
@@ -2699,7 +2566,7 @@ FRAMES: list = [
         3,
         "A20",
         "validate ok, no gateway touched",
-        files={"groups/web.yaml": _group(members=())},
+        files={"security-groups/web/group.yaml": _group(members=())},
         argv=["validate"],
         expect_rc=0,
         expect_out=("OK: 1 groups, 0 rules", "validation passed"),
@@ -2710,7 +2577,9 @@ FRAMES: list = [
         3,
         "A20",
         "validate reports file errors on stderr",
-        files={"groups/web.yaml": "name: web\nmembers:\n  - ip: 999.0.0.1\n"},
+        files={
+            "security-groups/web/group.yaml": "name: web\nmembers:\n  - ip: 999.0.0.1\n"
+        },
         argv=["validate"],
         expect_rc=1,
         expect_err=("999.0.0.1",),
@@ -2773,8 +2642,8 @@ FRAMES: list = [
         "A17",
         "clear-all warning names group and direction when stripping",
         files={
-            "groups/web.yaml": _group(),
-            "rules/web.yaml": _rules(sg="web", empty=("egress",)),
+            "security-groups/web/group.yaml": _group(),
+            **_rulefiles(sg="web", empty=("egress",)),
         },
         cloud={
             "sgs": [{"id": "sg-web", "name": "web"}],
@@ -2801,8 +2670,8 @@ FRAMES: list = [
         "A17",
         "no clear-all warning when the direction strips nothing",
         files={
-            "groups/web.yaml": _group(),
-            "rules/web.yaml": _rules(sg="web", empty=("egress",)),
+            "security-groups/web/group.yaml": _group(),
+            **_rulefiles(sg="web", empty=("egress",)),
         },
         cloud={
             "sgs": [{"id": "sg-web", "name": "web"}],
@@ -2818,7 +2687,7 @@ FRAMES: list = [
         3,
         "A20",
         "missing credentials name all four required vars",
-        files={"groups/web.yaml": _group(members=())},
+        files={"security-groups/web/group.yaml": _group(members=())},
         argv=["plan"],
         inject_gateway=False,
         expect_rc=1,
@@ -2846,7 +2715,7 @@ FRAMES: list = [
         3,
         "A20",
         "destroy --yes executes the teardown",
-        files={"groups/web.yaml": _group(members=())},
+        files={"security-groups/web/group.yaml": _group(members=())},
         cloud={"sgs": [{"id": "sg-1", "name": "web"}]},
         argv=["destroy", "web", "--yes"],
         expect_rc=0,
@@ -2857,7 +2726,7 @@ FRAMES: list = [
         3,
         "A20",
         "destroy without --yes is a dry run",
-        files={"groups/web.yaml": _group(members=())},
+        files={"security-groups/web/group.yaml": _group(members=())},
         cloud={"sgs": [{"id": "sg-1", "name": "web"}]},
         argv=["destroy", "web"],
         expect_rc=0,
@@ -2869,7 +2738,7 @@ FRAMES: list = [
         3,
         "A20",
         "destroy of an unknown name fails cleanly",
-        files={"groups/web.yaml": _group(members=())},
+        files={"security-groups/web/group.yaml": _group(members=())},
         argv=["destroy", "ghost"],
         expect_rc=1,
         expect_err=("no cloud security group named 'ghost'",),
@@ -2888,7 +2757,7 @@ FRAMES: list = [
         3,
         "A15",
         "duplicate cloud names fail with a clean error",
-        files={"groups/web.yaml": _group(members=())},
+        files={"security-groups/web/group.yaml": _group(members=())},
         cloud={
             "sgs": [
                 {"id": "sg-a", "name": "web"},
@@ -2938,7 +2807,7 @@ FRAMES: list = [
         3,
         "A20",
         "plan --yes is rejected at parse time with guidance",
-        files={"groups/web.yaml": _group(members=())},
+        files={"security-groups/web/group.yaml": _group(members=())},
         argv=["plan", "--yes"],
         raw_argv=True,
         inject_gateway=False,
@@ -2993,7 +2862,10 @@ FRAMES: list = [
         3,
         "A26",
         "plan --snapshot is fully offline: no creds, zero cloud reads",
-        files={"groups/web.yaml": _group(), "snapshot.json": _snapshot()},
+        files={
+            "security-groups/web/group.yaml": _group(),
+            "snapshot.json": _snapshot(),
+        },
         argv=["plan", "--snapshot", "snapshot.json"],
         inject_gateway=False,
         expect_rc=0,
@@ -3011,7 +2883,7 @@ FRAMES: list = [
         "A26",
         "apply --yes --snapshot warns the file is now stale",
         files={
-            "groups/web.yaml": _group(members=()),
+            "security-groups/web/group.yaml": _group(members=()),
             "snapshot.json": _snapshot(nics=()),
         },
         cloud={"sgs": [{"id": "sg-web", "name": "web", "description": ""}]},
@@ -3024,7 +2896,10 @@ FRAMES: list = [
         3,
         "A26",
         "snapshot.json present: plan uses it with no flag, no creds",
-        files={"groups/web.yaml": _group(), "snapshot.json": _snapshot()},
+        files={
+            "security-groups/web/group.yaml": _group(),
+            "snapshot.json": _snapshot(),
+        },
         argv=["plan"],
         inject_gateway=False,
         expect_rc=0,
@@ -3043,7 +2918,7 @@ FRAMES: list = [
         "A26",
         "drift lists cloud changes since the snapshot, rc 1",
         files={
-            "groups/web.yaml": _group(members=()),
+            "security-groups/web/group.yaml": _group(members=()),
             "snapshot.json": _snapshot(),
         },
         cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}]},
@@ -3057,7 +2932,7 @@ FRAMES: list = [
         "A26",
         "drift with an identical cloud exits 0",
         files={
-            "groups/web.yaml": _group(members=()),
+            "security-groups/web/group.yaml": _group(members=()),
             "snapshot.json": _snapshot(),
         },
         cloud={"sgs": [{"id": "sg-web", "name": "web", "description": ""}]},
@@ -3071,7 +2946,7 @@ FRAMES: list = [
         "A26",
         "drift --json emits the liquibase-shaped diff",
         files={
-            "groups/web.yaml": _group(members=()),
+            "security-groups/web/group.yaml": _group(members=()),
             "snapshot.json": _snapshot(),
         },
         cloud={"sgs": [{"id": "sg-x", "name": "extra", "description": ""}]},
@@ -3275,13 +3150,13 @@ FRAMES: list = [
         "A27",
         "import refuses to overwrite existing files without --force",
         files={
-            "groups/web.yaml": _group(members=()),
+            "security-groups/web/group.yaml": _group(members=()),
             "snapshot.json": _snapshot(),
         },
         argv=["import"],
         inject_gateway=False,
         expect_rc=1,
-        expect_err=("refusing to overwrite", "groups/web.yaml"),
+        expect_err=("refusing to overwrite", "security-groups/web/group.yaml"),
     ),
     Frame(
         "IMP-07",
@@ -3289,14 +3164,14 @@ FRAMES: list = [
         "A27",
         "import --force overwrites the existing files",
         files={
-            "groups/web.yaml": _group(members=()),
+            "security-groups/web/group.yaml": _group(members=()),
             "snapshot.json": _snapshot(),
         },
         argv=["import", "--force"],
         inject_gateway=False,
         expect_rc=0,
         expect_out=("import: 1 groups",),
-        expect_files=("groups/web.yaml",),
+        expect_files=("security-groups/web/group.yaml",),
     ),
     Frame(
         "DIR-01",
@@ -3331,14 +3206,16 @@ FRAMES: list = [
         "DIR-03",
         2,
         "A12",
-        "mixing the two layouts is a clean error",
-        files={
-            "groups/web.yaml": _group(members=()),
-            "security-groups/web/group.yaml": _group(members=()),
-        },
+        "legacy groups/ layout is gone: clean error with the migration "
+        "hint",
+        files={"groups/web.yaml": _group(members=())},
         usecase="load",
         expect_ok=False,
-        expect_error_contains=("two layouts mixed",),
+        expect_error_contains=(
+            "no security-groups/ directory",
+            "legacy",
+            "hcs-sg import",
+        ),
     ),
     Frame(
         "DIR-04",

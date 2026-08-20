@@ -14,7 +14,6 @@ from hcs_sg_iac.model.entities import (
     RulesFile,
     parse_group,
     parse_rule_list,
-    parse_rules_file,
 )
 from hcs_sg_iac.model.portset import PortSet
 from hcs_sg_iac.model.remote import RemoteGroup
@@ -23,7 +22,7 @@ from hcs_sg_iac.model.report import Report
 _FAILED = object()  # sentinel: read/parse failed (error already reported)
 
 # SafeDumper represents known builtins only; teach it that a PortSet IS
-# its canonical string (dump_group/dump_rules_file may carry one).
+# its canonical string (the dump helpers may carry one).
 yaml.SafeDumper.add_representer(PortSet, lambda d, x: d.represent_str(x + ""))
 
 
@@ -96,10 +95,14 @@ def _load_per_sg_layout(
     groups: dict[str, Group] = {}
     rules: dict[str, RulesFile] = {}
     for entry in sorted(sgs_dir.iterdir()):
+        if entry.name.startswith("."):  # .keep & friends: empty-store
+            continue  # markers, not groups
         where_dir = f"security-groups/{entry.name}"
         if not entry.is_dir():
-            report.error(
-                where_dir, "expected a directory per security group here"
+            report.warning(
+                where_dir,
+                "ignoring stray file: expected a directory "
+                "per security group",
             )
             continue
         if not GROUP_NAME_RE.fullmatch(entry.name):
@@ -154,96 +157,24 @@ def _load_per_sg_layout(
 
 
 def load_project(root: Path) -> "tuple[DesiredState | None, Report]":
+    """One layout: security-groups/<name>/ per-SG directories."""
     report = Report()
     root = Path(root)
-    groups_dir, rules_dir = root / "groups", root / "rules"
     sgs_dir = root / "security-groups"
-    if groups_dir.is_dir() and sgs_dir.is_dir():
+    if not sgs_dir.is_dir():
+        hint = ""
+        if (root / "groups").is_dir():
+            hint = (
+                " (the legacy groups/+rules/ layout was removed — "
+                "delete it and run 'hcs-sg import' to regenerate as "
+                "security-groups/)"
+            )
         report.error(
-            "groups/",
-            "two layouts mixed: groups/ (flat) and security-groups/ "
-            "(per-SG directories) — pick one per project",
+            "security-groups/",
+            f"no security-groups/ directory — nothing to manage{hint}",
         )
         return None, report
-    if sgs_dir.is_dir():
-        sg_groups, sg_rules = _load_per_sg_layout(root, report)
-        if not report.ok:
-            return None, report
-        return DesiredState(groups=sg_groups, rules=sg_rules), report
-    if not groups_dir.is_dir():
-        report.error("groups/", "no groups/ directory — nothing to manage")
-        return None, report
-    _warn_yml_siblings(groups_dir, "groups", report)
-
-    groups: dict[str, Group] = {}  # name -> Group
-    seen: dict[str, str] = {}  # name -> where first declared
-    for path in sorted(groups_dir.glob("*.yaml")):
-        where = f"groups/{path.name}"
-        d = _load_yaml(path, where, report)
-        if d is _FAILED:
-            continue
-        if d is None:
-            report.error(where, "file is empty or contains no document")
-            continue
-        g = parse_group(d, where, report)
-        if g is None:
-            continue
-        if g.name in seen:
-            report.error(
-                where,
-                f"duplicate group name {g.name!r} "
-                f"(already defined in {seen[g.name]})",
-            )
-            continue
-        seen[g.name] = where
-        if path.stem != g.name:
-            report.error(
-                where,
-                f"filename must equal group name "
-                f"({path.stem!r} != {g.name!r})",
-            )
-            continue
-        groups[g.name] = g
-
-    _warn_yml_siblings(rules_dir, "rules", report)
-    rules: dict[str, RulesFile] = {}  # name -> RulesFile
-    seen_sg: dict[str, str] = {}  # sg -> where first declared
-    for path in sorted(rules_dir.glob("*.yaml")) if rules_dir.is_dir() else []:
-        where = f"rules/{path.name}"
-        d = _load_yaml(path, where, report)
-        if d is _FAILED:
-            continue
-        if d is None:
-            report.error(where, "file is empty or contains no document")
-            continue
-        rf = parse_rules_file(d, where, report)
-        if rf is None:
-            continue
-        if rf.security_group in seen_sg:
-            report.error(
-                where,
-                f"duplicate rules file for "
-                f"{rf.security_group!r} "
-                f"(already defined in {seen_sg[rf.security_group]})",
-            )
-            continue
-        seen_sg[rf.security_group] = where
-        if path.stem != rf.security_group:
-            report.error(
-                where,
-                f"filename must equal security_group "
-                f"({path.stem!r} != {rf.security_group!r})",
-            )
-            continue
-        if rf.security_group not in groups:
-            report.error(
-                where,
-                f"security_group {rf.security_group!r} has "
-                f"no groups/{rf.security_group}.yaml",
-            )
-            continue
-        rules[rf.security_group] = rf
-
+    groups, rules = _load_per_sg_layout(root, report)
     if not report.ok:
         return None, report
     return DesiredState(groups=groups, rules=rules), report
@@ -268,18 +199,6 @@ def dump_group(g) -> str:
     d: dict = {"name": g.name, "description": g.description}
     if g.members:
         d["members"] = [{"ip": m.ip} for m in g.members]
-    return yaml.safe_dump(
-        d, sort_keys=False, allow_unicode=True, default_flow_style=False
-    )
-
-
-def dump_rules_file(rf) -> str:
-    """RulesFile entity -> rules/<name>.yaml text (the parse_rules_file
-    inverse). A None (unmanaged) direction stays absent; [] stays []."""
-    d: dict = {"security_group": rf.security_group}
-    for key, rules in (("ingress", rf.ingress), ("egress", rf.egress)):
-        if rules is not None:
-            d[key] = [_rule_to_dict(r) for r in rules]
     return yaml.safe_dump(
         d, sort_keys=False, allow_unicode=True, default_flow_style=False
     )

@@ -25,7 +25,7 @@ def resolve_memberships(reader, state: DesiredState) -> Resolution:
             found = matches.get(m.ip, [])
             if not found:
                 report.error(
-                    f"groups/{g.name}.yaml",
+                    f"security-groups/{g.name}/group.yaml",
                     f"ip {m.ip}: no NIC found in any VPC of the account",
                 )
             elif len(found) > 1:
@@ -35,7 +35,7 @@ def resolve_memberships(reader, state: DesiredState) -> Resolution:
                     for n in found
                 )
                 report.error(
-                    f"groups/{g.name}.yaml",
+                    f"security-groups/{g.name}/group.yaml",
                     f"ip {m.ip}: matches multiple NICs ({cands}) — "
                     f"use a unique IP or a nic: entry",
                 )

@@ -65,16 +65,13 @@ def _seeded():
 
 
 def _write(root, imp):
-    (root / "groups").mkdir(exist_ok=True)
     for name, g in imp.groups.items():
-        (root / "groups" / f"{name}.yaml").write_text(
-            yaml_config.dump_group(g), encoding="utf-8"
-        )
-    (root / "rules").mkdir(exist_ok=True)
-    for name, rf in imp.rules.items():
-        (root / "rules" / f"{name}.yaml").write_text(
-            yaml_config.dump_rules_file(rf), encoding="utf-8"
-        )
+        for rel, text in yaml_config.dump_security_group_dir(
+            g, imp.rules.get(name)
+        ).items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
 
 def test_import_then_plan_converges(tmp_path):

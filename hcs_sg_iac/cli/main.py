@@ -193,9 +193,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument(
         "which",
         nargs="?",
-        choices=["group", "rules", "all"],
+        choices=["group", "ingress", "egress", "all"],
         default="all",
-        help="which schema (default: both, keyed group_file/" "rules_file)",
+        help="which schema (default: all, keyed group_file/"
+        "ingress_file/egress_file)",
     )
     return p
 
@@ -369,28 +370,10 @@ def main(argv=None, gateway=None) -> int:
         imported = importer.import_snapshot(
             snapshot_from_json(src.read_text(encoding="utf-8")).snapshot
         )
-        # Layout: an existing security-groups/ tree (or a fresh project)
-        # gets the per-SG directory layout; legacy groups/+rules/
-        # projects keep their shape.
-        per_sg = (project / "security-groups").is_dir()
-        if per_sg or not (project / "groups").is_dir():
-            writes: dict = {}
-            for n, g in imported.groups.items():
-                writes.update(
-                    yaml_config.dump_security_group_dir(
-                        g, imported.rules.get(n)
-                    )
-                )
-        else:
-            writes = {
-                f"groups/{n}.yaml": yaml_config.dump_group(g)
-                for n, g in imported.groups.items()
-            }
+        writes: dict = {}
+        for n, g in imported.groups.items():
             writes.update(
-                {
-                    f"rules/{n}.yaml": yaml_config.dump_rules_file(rf)
-                    for n, rf in imported.rules.items()
-                }
+                yaml_config.dump_security_group_dir(g, imported.rules.get(n))
             )
         clashes = sorted(
             rel

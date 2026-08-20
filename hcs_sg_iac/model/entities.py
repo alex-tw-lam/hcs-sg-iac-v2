@@ -211,30 +211,6 @@ def _parse_rule_items(
     return tuple(rules), ok
 
 
-def _parse_rules(
-    d, where: str, report: Report, key: str, direction: str, remote_key: str
-):
-    """Parse the ingress/egress list of a rules document.
-
-    Returns (rules, ok); rules is None when the section is absent
-    (= unmanaged, leave the cloud side alone).
-    """
-    if key not in d:
-        return None, True  # section absent -> unmanaged
-    raw = d[key]
-    if raw is None:
-        report.error(
-            where,
-            f"{key} must be a list (use [] for remove-all, "
-            f"or delete the key to leave the direction unmanaged)",
-        )
-        return (), False
-    if not isinstance(raw, list):
-        report.error(where, f"{key} must be a list")
-        return (), False
-    return _parse_rule_items(raw, where, report, key, direction, remote_key)
-
-
 def parse_rule_list(
     raw, where: str, report: Report, direction: str, remote_key: str
 ) -> tuple:
@@ -255,35 +231,3 @@ def parse_rule_list(
     return _parse_rule_items(
         raw, where, report, direction, direction, remote_key
     )[0]
-
-
-def parse_rules_file(d, where: str, report: Report) -> RulesFile | None:
-    """Parse one rules/<name>.yaml document (a plain dict)."""
-    if not isinstance(d, dict):
-        report.error(where, "rules file must be a YAML mapping")
-        return None
-    sg = d.get("security_group")
-    ok = True
-    if not isinstance(sg, str) or not GROUP_NAME_RE.fullmatch(sg or ""):
-        report.error(
-            where, f"security_group {sg!r} must match {GROUP_NAME_RE.pattern}"
-        )
-        ok = False
-    ingress, ok_in = _parse_rules(
-        d, where, report, "ingress", "ingress", "source"
-    )
-    egress, ok_eg = _parse_rules(
-        d, where, report, "egress", "egress", "destination"
-    )
-    ok = ok and ok_in and ok_eg
-    return (
-        RulesFile(
-            security_group=cast(str, sg),
-            ingress=ingress or (),
-            egress=egress or (),
-            ingress_managed=ingress is not None,
-            egress_managed=egress is not None,
-        )
-        if ok
-        else None
-    )

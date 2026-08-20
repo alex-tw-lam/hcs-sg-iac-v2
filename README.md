@@ -45,9 +45,9 @@ An absent `ingress.yaml`/`egress.yaml` = that direction is UNMANAGED;
 as sibling subprojects: `hcs-sg plan --project projects/dev` (each with
 its own groups/rules/snapshot/audit).
 
-Legacy flat layout (still read, unchanged): `groups/<name>.yaml` +
-`rules/<name>.yaml` per SG. Mixing both layouts in one project is a
-clean error.
+The legacy flat `groups/`+`rules/` layout was REMOVED in v0.6.0 —
+running against an old project fails with a one-line hint to delete it
+and re-`import` (offline, zero cloud calls).
 
 `source`/`destination` = group name or CIDR (`0.0.0.0/0`, bare IPs
 auto-/32). Protocol: tcp|udp|icmp|icmpv6|all. Ports: "80", "22,443",
@@ -115,7 +115,7 @@ them by generating `groups/` and `rules/` YAML **from the snapshot** —
 offline, zero cloud calls:
 
     hcs-sg snapshot            # fresh inventory first (the import source)
-    hcs-sg import              # writes groups/<name>.yaml + rules/<name>.yaml
+    hcs-sg import              # writes security-groups/<name>/{group,ingress,egress}.yaml
                                # refuses to overwrite existing files
                                # without --force; --json lists what it did
 
@@ -169,8 +169,8 @@ Editor/validation schemas for the config files, generated from the model
 (single source of truth — patterns and enums come from the model
 constants, a drift guard test pins the committed copies):
 
-    hcs-sg schema group           # groups/<name>.yaml schema
-    hcs-sg schema rules           # rules/<name>.yaml schema
+    hcs-sg schema group           # group.yaml schema
+    hcs-sg schema ingress         # ingress.yaml schema (egress alike)
     hcs-sg schema                 # both, keyed
 
 Static copies live in `schemas/*.schema.json` (JSON Schema draft
@@ -178,7 +178,8 @@ Static copies live in `schemas/*.schema.json` (JSON Schema draft
 after model changes:
 
     hcs-sg schema group > schemas/group-file.schema.json
-    hcs-sg schema rules > schemas/rules-file.schema.json
+    hcs-sg schema ingress > schemas/ingress-file.schema.json
+    hcs-sg schema egress > schemas/egress-file.schema.json
 
 Single-file constraints only — filename==name, cross-file
 group refs and cloud-side IP resolution are validated by `hcs-sg

@@ -11,9 +11,9 @@ from hcs_sg_iac.model.errors import CloudError
 
 @pytest.fixture
 def project(tmp_path):
-    g = tmp_path / "groups"
-    g.mkdir()
-    (g / "web.yaml").write_text(
+    g = tmp_path / "security-groups" / "web"
+    g.mkdir(parents=True)
+    (g / "group.yaml").write_text(
         "name: web\ndescription: web\nmembers:\n  - ip: 10.0.1.10\n"
     )
     return tmp_path
@@ -105,8 +105,8 @@ def test_schema_command_outputs_json_no_gateway(capsys):
 
     for which, keys in (
         ("group", None),
-        ("rules", None),
-        ("all", ["group_file", "rules_file"]),
+        ("egress", None),
+        ("all", ["group_file", "ingress_file", "egress_file"]),
     ):
         rc = main(["schema", which], gateway=None)
         assert rc == 0

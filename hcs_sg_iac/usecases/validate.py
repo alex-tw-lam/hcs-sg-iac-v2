@@ -10,11 +10,11 @@ from hcs_sg_iac.model.report import Report
 def validate_state(state: DesiredState) -> Report:
     report = Report()
     for gname, rf in state.rules.items():
-        where = f"rules/{gname}.yaml"
+        where = f"security-groups/{gname}/"
         if gname not in state.groups:  # loader also catches this;
             report.error(
                 where,  # belt and braces for direct use
-                f"security_group {gname!r} has no groups/{gname}.yaml",
+                f"{gname!r} has no security-groups/{gname}/ directory",
             )
         for rule in rf.ingress + rf.egress:
             if (
