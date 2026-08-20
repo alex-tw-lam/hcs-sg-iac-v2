@@ -8,10 +8,12 @@ from pathlib import Path
 import yaml
 
 from hcs_sg_iac.model.entities import (
+    GROUP_NAME_RE,
     DesiredState,
     Group,
     RulesFile,
     parse_group,
+    parse_rule_list,
     parse_rules_file,
 )
 from hcs_sg_iac.model.portset import PortSet
@@ -60,10 +62,114 @@ def _warn_yml_siblings(directory: Path, label: str, report: Report) -> None:
         )
 
 
+def _load_direction_file(
+    entry: Path,
+    where_dir: str,
+    direction: str,
+    remote_key: str,
+    report: Report,
+) -> "tuple[tuple | None, bool]":
+    """One optional <direction>.yaml inside an SG directory. Absent file
+    -> (None, False) = unmanaged; present -> (rules, True)."""
+    path = entry / f"{direction}.yaml"
+    if not path.is_file():
+        return None, False
+    dwhere = f"{where_dir}/{direction}.yaml"
+    raw = _load_yaml(path, dwhere, report)
+    if raw is _FAILED:
+        return (), True
+    return (
+        parse_rule_list(raw, dwhere, report, direction, remote_key),
+        True,
+    )
+
+
+def _load_per_sg_layout(
+    root: Path, report: Report
+) -> "tuple[dict[str, Group], dict[str, RulesFile]]":
+    """security-groups/<name>/: one directory per SG — group.yaml plus
+    OPTIONAL ingress.yaml/egress.yaml. An absent direction file means
+    that direction is UNMANAGED (same semantics as an absent section in
+    the flat layout); a file containing [] manages-and-removes-all."""
+    sgs_dir = root / "security-groups"
+    _warn_yml_siblings(sgs_dir, "security-groups", report)
+    groups: dict[str, Group] = {}
+    rules: dict[str, RulesFile] = {}
+    for entry in sorted(sgs_dir.iterdir()):
+        where_dir = f"security-groups/{entry.name}"
+        if not entry.is_dir():
+            report.error(
+                where_dir, "expected a directory per security group here"
+            )
+            continue
+        if not GROUP_NAME_RE.fullmatch(entry.name):
+            report.error(
+                where_dir,
+                f"directory name must match {GROUP_NAME_RE.pattern}",
+            )
+            continue
+        if not (entry / "group.yaml").is_file():
+            report.error(where_dir, "missing group.yaml")
+            continue
+        where = f"{where_dir}/group.yaml"
+        d = _load_yaml(entry / "group.yaml", where, report)
+        if d is _FAILED or d is None:
+            if d is None:
+                report.error(where, "file is empty or contains no document")
+            continue
+        g = parse_group(d, where, report)
+        if g is None:
+            continue
+        if g.name != entry.name:
+            report.error(
+                where,
+                f"directory name must equal group name "
+                f"({entry.name!r} != {g.name!r})",
+            )
+            continue
+        for stray in sorted(entry.iterdir()):
+            if (
+                stray.name not in ("group.yaml", "ingress.yaml", "egress.yaml")
+                and stray.is_file()
+            ):
+                report.warning(
+                    f"{where_dir}/{stray.name}", "ignoring unexpected file"
+                )
+        groups[g.name] = g
+        ingress, ing_managed = _load_direction_file(
+            entry, where_dir, "ingress", "source", report
+        )
+        egress, eg_managed = _load_direction_file(
+            entry, where_dir, "egress", "destination", report
+        )
+        if ing_managed or eg_managed:
+            rules[g.name] = RulesFile(
+                security_group=g.name,
+                ingress=ingress or (),
+                egress=egress or (),
+                ingress_managed=ing_managed,
+                egress_managed=eg_managed,
+            )
+    return groups, rules
+
+
 def load_project(root: Path) -> "tuple[DesiredState | None, Report]":
     report = Report()
     root = Path(root)
     groups_dir, rules_dir = root / "groups", root / "rules"
+    sgs_dir = root / "security-groups"
+    if groups_dir.is_dir() and sgs_dir.is_dir():
+        report.error(
+            "groups/",
+            "two layouts mixed: groups/ (flat) and security-groups/ "
+            "(per-SG directories) — pick one per project",
+        )
+        return None, report
+    if sgs_dir.is_dir():
+        sg_groups, sg_rules = _load_per_sg_layout(root, report)
+        if not report.ok:
+            return None, report
+        return DesiredState(groups=sg_groups, rules=sg_rules), report
     if not groups_dir.is_dir():
         report.error("groups/", "no groups/ directory — nothing to manage")
         return None, report
@@ -177,3 +283,25 @@ def dump_rules_file(rf) -> str:
     return yaml.safe_dump(
         d, sort_keys=False, allow_unicode=True, default_flow_style=False
     )
+
+
+def dump_security_group_dir(g, rf) -> "dict[str, str]":
+    """Group + RulesFile entities -> security-groups/<name>/ files (the
+    per-SG directory layout). Import manages everything, so both
+    direction files are always written ([] = managed remove-all)."""
+    files = {f"security-groups/{g.name}/group.yaml": dump_group(g)}
+    rf = rf or RulesFile(
+        security_group=g.name,
+        ingress=(),
+        egress=(),
+        ingress_managed=True,
+        egress_managed=True,
+    )
+    for direction, rules in (("ingress", rf.ingress), ("egress", rf.egress)):
+        files[f"security-groups/{g.name}/{direction}.yaml"] = yaml.safe_dump(
+            [_rule_to_dict(r) for r in (rules or ())],
+            sort_keys=False,
+            allow_unicode=True,
+            default_flow_style=False,
+        )
+    return files

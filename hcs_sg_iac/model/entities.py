@@ -143,30 +143,19 @@ def parse_group(d, where: str, report: Report) -> Group | None:
     )
 
 
-def _parse_rules(
-    d, where: str, report: Report, key: str, direction: str, remote_key: str
+def _parse_rule_items(
+    raw,
+    where: str,
+    report: Report,
+    label: str,
+    direction: str,
+    remote_key: str,
 ):
-    """Parse the ingress/egress list of a rules document.
-
-    Returns (rules, ok); rules is None when the section is absent
-    (= unmanaged, leave the cloud side alone).
-    """
+    """Parse ONE list of rule mappings (shared by the flat rules file
+    and the per-direction files). Returns (rules, ok)."""
     rules, seen, ok = [], set(), True
-    if key not in d:
-        return None, True  # section absent -> unmanaged
-    raw = d[key]
-    if raw is None:
-        report.error(
-            where,
-            f"{key} must be a list (use [] for remove-all, "
-            f"or delete the key to leave the direction unmanaged)",
-        )
-        return (), False
-    if not isinstance(raw, list):
-        report.error(where, f"{key} must be a list")
-        return (), False
     for i, rd in enumerate(raw):
-        rwhere = f"{where}: {key}[{i}]"
+        rwhere = f"{where}: {label}[{i}]"
         if not isinstance(rd, dict):
             report.error(rwhere, "rule must be a mapping")
             ok = False
@@ -220,6 +209,52 @@ def _parse_rules(
         seen.add(rule.identity())
         rules.append(rule)
     return tuple(rules), ok
+
+
+def _parse_rules(
+    d, where: str, report: Report, key: str, direction: str, remote_key: str
+):
+    """Parse the ingress/egress list of a rules document.
+
+    Returns (rules, ok); rules is None when the section is absent
+    (= unmanaged, leave the cloud side alone).
+    """
+    if key not in d:
+        return None, True  # section absent -> unmanaged
+    raw = d[key]
+    if raw is None:
+        report.error(
+            where,
+            f"{key} must be a list (use [] for remove-all, "
+            f"or delete the key to leave the direction unmanaged)",
+        )
+        return (), False
+    if not isinstance(raw, list):
+        report.error(where, f"{key} must be a list")
+        return (), False
+    return _parse_rule_items(raw, where, report, key, direction, remote_key)
+
+
+def parse_rule_list(
+    raw, where: str, report: Report, direction: str, remote_key: str
+) -> tuple:
+    """Parse a bare list of rules — the per-direction file layout
+    (security-groups/<name>/ingress|egress.yaml). An empty/null document
+    is the remove-all guidance error ([] is the explicit empty list)."""
+    if raw is None:
+        report.error(
+            where,
+            f"{direction} file is empty or contains no document "
+            f"(use [] for remove-all, or delete the file to leave "
+            f"the direction unmanaged)",
+        )
+        return ()
+    if not isinstance(raw, list):
+        report.error(where, f"{direction} file must be a list of rules")
+        return ()
+    return _parse_rule_items(
+        raw, where, report, direction, direction, remote_key
+    )[0]
 
 
 def parse_rules_file(d, where: str, report: Report) -> RulesFile | None:
