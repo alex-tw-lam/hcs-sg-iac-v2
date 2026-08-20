@@ -1,0 +1,27 @@
+[project]
+name = "hcs-sg-iac"
+version = "0.1.0"
+description = "Security-group-as-code CLI for HCS 8.5.1 (validate / plan / apply, dry-run by default)"
+requires-python = ">=3.11"
+dependencies = [
+    "PyYAML>=6.0",
+    "huaweicloudsdkvpc==3.1.210",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+hcs-sg = "hcs_sg_iac.cli.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["hcs_sg_iac*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers"]
+markers = ["cloud_contract: needs real HCS credentials (HCS_AK/HCS_SK set)"]
