@@ -39,6 +39,11 @@ def render_plan(al, quota=None, executed=None, dry_run: bool = True) -> str:
     lines.append("")
     lines.append(f"Plan: {s['add']} to add, {s['change']} to change, "
                  f"{s['destroy']} to destroy.")
+    # WARN only for managed+empty directions the plan will ACTUALLY strip
+    # (the plan engine computed that set as ActionList.clears): a
+    # []-direction with no cloud rules deletes nothing — no false alarm.
+    if al.clears:
+        lines.append(f"WARNING: this removes ALL {', '.join(al.clears)}.")
     if quota:
         if quota["left"] is None:           # gateway without quota_snapshot
             lines.append(f"Quota: {quota['needed']} calls needed, "
@@ -59,7 +64,7 @@ def render_plan(al, quota=None, executed=None, dry_run: bool = True) -> str:
                      f"throttled (re-run to resume).")
     if dry_run and executed is None:
         lines.append("")
-        lines.append("Dry run — re-run with --execute to perform these changes.")
+        lines.append("Dry run — re-run with --yes to perform these changes.")
     return "\n".join(lines)
 
 

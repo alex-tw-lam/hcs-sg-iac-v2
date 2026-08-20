@@ -12,8 +12,9 @@ Row conventions
   input) and report/exception expectations.
 - tier 2 rows carry usecase (+files/cloud seed) and ActionList /
   gateway-state expectations.
-- tier 3 rows carry argv/stdin/env and rc/stdout/stderr expectations;
-  the consumer inserts --project unless raw_argv is set.
+- tier 3 rows carry argv/env and rc/stdout/stderr expectations; the
+  consumer inserts --project unless raw_argv is set. No command prompts
+  (--yes is the consent), so no row carries stdin answers.
 - expect_* None means "not checked"; () means "checked empty".
 - cloud seeds and expect_cloud tuples are interpreted by
   builders.seed_gateway / builders.check_cloud.
@@ -21,9 +22,6 @@ Row conventions
   listed in DEFERRED with a reason; tier 4 stays hand-written (TIER4).
 """
 from dataclasses import dataclass
-
-RAISE_EOF = "RAISE_EOF"     # stdin sentinel: input() raises EOFError
-RAISE_KI = "RAISE_KI"       # stdin sentinel: input() raises KeyboardInterrupt
 
 
 @dataclass(frozen=True)
@@ -38,7 +36,6 @@ class Frame:
     model_input: object = None # tier 1 raw input; tier 2 op script / name
     usecase: str = None        # tier 2 operation under test
     argv: list = None          # tier 3, without --project (consumer adds it)
-    stdin: str = None          # input() answer, or a RAISE_* sentinel
     env: dict = None           # env overrides (None value deletes the var)
     raw_argv: bool = False     # tier 3: use argv verbatim (no --project)
     chdir: bool = False        # tier 3: run from inside the project dir
@@ -418,18 +415,9 @@ FRAMES: list = [
                  "rules/web.yaml": _rules(ingress=[("0.0.0.0/0", "tcp", '"22"')])},
           argv=["validate"], expect_rc=0,
           expect_out=("OK: 1 groups, 1 rules",)),
-    Frame("CLI-05", 3, "A20",
-          "--yes never implies --execute: dry run, zero writes",
-          **_cli(argv=["apply", "--yes"], expect_rc=0,
-                 expect_out=("Dry run",), expect_call_log=[])),
-    Frame("CLI-07.a", 3, "A20",
-          "apply confirmation is case-sensitive: YES aborts",
-          **_cli(argv=["apply", "--execute"], stdin="YES", expect_rc=1,
-                 expect_err=("aborted",), expect_call_log=[])),
     Frame("CLI-12.a", 3, "A21",
-          "apply --execute --json carries per-action results",
-          **_cli(argv=["apply", "--execute", "--json"], stdin="yes",
-                 expect_rc=0,
+          "apply --yes --json carries per-action results",
+          **_cli(argv=["apply", "--yes", "--json"], expect_rc=0,
                  expect_out=('"results"',),
                  expect_json={"summary": {"add": 2, "change": 0, "destroy": 0}})),
     Frame("CLI-12.b", 3, "A21",
@@ -438,15 +426,9 @@ FRAMES: list = [
           cloud={"sgs": [{"id": "sg-1", "name": "web"}]},
           argv=["destroy", "web", "--json"], expect_rc=0,
           expect_json={"summary": {"add": 0, "change": 0, "destroy": 1}}),
-    Frame("CLI-14", 3, "A20",
-          "destroy confirmation requires the exact typed name",
-          files={"groups/web.yaml": _group(members=())},
-          cloud={"sgs": [{"id": "sg-1", "name": "web"}]},
-          argv=["destroy", "web", "--execute"], stdin="wrong", expect_rc=1,
-          expect_err=("aborted",), expect_call_log=[]),
     Frame("CLI-15", 3, "A19",
-          "throttled --execute exits 1 with a resume hint",
-          **_cli(argv=["apply", "--execute", "--yes"],
+          "throttled --yes exits 1 with a resume hint",
+          **_cli(argv=["apply", "--yes"],
                  cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}],
                         "budget": 1},
                  expect_rc=1, expect_out=("1 throttled", "re-run to resume"))),
@@ -1006,13 +988,13 @@ FRAMES: list = [
           expect_actions=(("-", "rule", "v6"),),
           expect_clears=("egress rules of v6",), expect_unmanaged=()),
     Frame("PLAN-16", 2, "A15",
-          "duplicate cloud SG names abort planning with both ids",
+          "duplicate cloud SG names abort planning with every id listed",
           usecase="plan", files={"groups/web.yaml": _group(members=())},
           cloud={"sgs": [{"id": "sg-a", "name": "web", "description": "d1"},
                          {"id": "sg-b", "name": "web", "description": "d2"}]},
           expect_ok=False,
-          expect_error_contains=("duplicate cloud security group name 'web'",
-                                 "(sg-a, sg-b)")),
+          expect_error_contains=("duplicate cloud security group name",
+                                 "'web' (sg-a, sg-b)")),
     Frame("PLAN-17", 2, "A17",
           "managed-empty direction with no cloud rules raises no alarm",
           usecase="plan",
@@ -1121,28 +1103,17 @@ FRAMES: list = [
     Frame("CLI-04", 3, "A20", "apply defaults to dry run",
           **_cli(argv=["apply"], expect_rc=0,
                  expect_out=("Dry run",), expect_call_log=[])),
-    Frame("CLI-06", 3, "A20", "apply --execute with yes performs the writes",
-          **_cli(argv=["apply", "--execute"], stdin="yes", expect_rc=0,
+    Frame("CLI-06", 3, "A20", "apply --yes performs the writes",
+          **_cli(argv=["apply", "--yes"], expect_rc=0,
                  expect_out=("Apply complete: 2 ok",),
                  expect_cloud=(("sg_exists", "web"),
                                ("attached", "sg-of:web", "p1")))),
     Frame("CLI-06.a", 3, "A22",
-          "post-execute quota reflects already-spent writes",
-          **_cli(argv=["apply", "--execute"], stdin="yes", expect_rc=0,
-                 expect_out=("23 left",), expect_out_absent=("25 left",))),
-    Frame("CLI-07", 3, "A20", "answering no aborts before any write",
-          **_cli(argv=["apply", "--execute"], stdin="no", expect_rc=1,
-                 expect_err=("aborted",), expect_call_log=[])),
-    Frame("CLI-08", 3, "A20", "EOF on the prompt aborts",
-          **_cli(argv=["apply", "--execute"], stdin=RAISE_EOF, expect_rc=1,
-                 expect_err=("aborted",), expect_call_log=[])),
-    Frame("CLI-08.a", 3, "A20", "KeyboardInterrupt on the prompt aborts",
-          **_cli(argv=["apply", "--execute"], stdin=RAISE_KI, expect_rc=1,
-                 expect_err=("aborted",), expect_call_log=[])),
-    Frame("CLI-09", 3, "A20", "--yes skips the prompt entirely",
-          **_cli(argv=["apply", "--execute", "--yes"], expect_rc=0,
-                 expect_cloud=(("sg_exists", "web"),
-                               ("attached", "sg-of:web", "p1")))),
+          "post-write quota reflects already-spent writes",
+          # no absent-pin: the pre-write preview legitimately shows the
+          # pre-execute "25 left"; "23 left" present pins the FINAL table
+          **_cli(argv=["apply", "--yes"], expect_rc=0,
+                 expect_out=("23 left", "RESULT"))),
     Frame("CLI-10", 3, "A17",
           "clear-all warning names group and direction when stripping",
           files={"groups/web.yaml": _group(),
@@ -1153,7 +1124,7 @@ FRAMES: list = [
                  "rules": [{"id": "r1", "sg": "sg-web", "direction": "egress",
                             "protocol": "tcp", "ports": "80",
                             "prefix": "0.0.0.0/0"}]},
-          argv=["apply", "--execute"], stdin="yes", expect_rc=0,
+          argv=["apply", "--yes"], expect_rc=0,
           expect_out=("removes ALL egress rules of web",)),
     Frame("CLI-10.a", 3, "A17",
           "no clear-all warning when the direction strips nothing",
@@ -1162,7 +1133,7 @@ FRAMES: list = [
           cloud={"sgs": [{"id": "sg-web", "name": "web"}],
                  "nics": [{"port_id": "p1", "ip": "10.0.1.10"}],
                  "attached": [["sg-web", "p1"]]},
-          argv=["apply", "--execute"], stdin="yes", expect_rc=0,
+          argv=["apply", "--yes"], expect_rc=0,
           expect_out_absent=("removes ALL",)),
     Frame("CLI-11", 3, "A20",
           "missing credentials name all four required vars",
@@ -1175,12 +1146,12 @@ FRAMES: list = [
           **_cli(argv=["plan", "--json"], expect_rc=0,
                  expect_json={"summary": {"add": 2, "change": 0,
                                           "destroy": 0}})),
-    Frame("CLI-13", 3, "A20", "destroy executes after the exact name",
+    Frame("CLI-13", 3, "A20", "destroy --yes executes the teardown",
           files={"groups/web.yaml": _group(members=())},
           cloud={"sgs": [{"id": "sg-1", "name": "web"}]},
-          argv=["destroy", "web", "--execute"], stdin="web", expect_rc=0,
+          argv=["destroy", "web", "--yes"], expect_rc=0,
           expect_cloud=(("sg_missing", "web"),)),
-    Frame("CLI-13.a", 3, "A20", "destroy without --execute is a dry run",
+    Frame("CLI-13.a", 3, "A20", "destroy without --yes is a dry run",
           files={"groups/web.yaml": _group(members=())},
           cloud={"sgs": [{"id": "sg-1", "name": "web"}]},
           argv=["destroy", "web"], expect_rc=0,
@@ -1189,8 +1160,8 @@ FRAMES: list = [
           files={"groups/web.yaml": _group(members=())},
           argv=["destroy", "ghost"], expect_rc=1,
           expect_err=("no cloud security group named 'ghost'",)),
-    Frame("CLI-17", 3, "A20", "--execute writes audit.jsonl in the project",
-          **_cli(argv=["apply", "--execute"], stdin="yes", expect_rc=0,
+    Frame("CLI-17", 3, "A20", "--yes writes audit.jsonl in the project",
+          **_cli(argv=["apply", "--yes"], expect_rc=0,
                  expect_files=("audit.jsonl",))),
     Frame("CLI-20", 3, "A15", "duplicate cloud names fail with a clean error",
           files={"groups/web.yaml": _group(members=())},
@@ -1198,6 +1169,30 @@ FRAMES: list = [
                          {"id": "sg-b", "name": "web"}]},
           argv=["plan"], expect_rc=1,
           expect_err=("duplicate cloud security group name",)),
+    Frame("CLI-21", 3, "A20",
+          "--verbose plan streams progress to stderr, stdout unchanged",
+          **_cli(argv=["plan", "--verbose"], expect_rc=0,
+                 expect_out=("+", "member", "Dry run"),
+                 expect_out_absent=("hcs-sg:",),
+                 expect_err=("hcs-sg:", "gateway call",
+                             "reading cloud snapshot"))),
+    Frame("CLI-21.a", 3, "A20",
+          "--verbose apply logs each action as it executes",
+          **_cli(argv=["apply", "--yes", "--verbose"],
+                 expect_rc=0,
+                 expect_err=("hcs-sg:", "executing + group web",
+                             "action ok: + group web"))),
+    Frame("CLI-22", 3, "A20",
+          "plan --yes is rejected at parse time with guidance",
+          files={"groups/web.yaml": _group(members=())},
+          argv=["plan", "--yes"], raw_argv=True,
+          inject_gateway=False, expect_rc=2,
+          expect_err=("read-only", "apply --yes")),
+    Frame("CLI-23", 3, "A20",
+          "--yes previews the plan table before writing it out",
+          **_cli(argv=["apply", "--yes"], expect_rc=0,
+                 expect_out=("Plan: 2 to add", "RESULT", "Apply complete"),
+                 expect_cloud=(("sg_exists", "web"),))),
 ]
 
 TIER1 = [f for f in FRAMES if f.tier == 1]

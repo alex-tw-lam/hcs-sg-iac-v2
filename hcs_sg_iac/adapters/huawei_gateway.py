@@ -11,6 +11,7 @@ description is set right after via NeutronUpdateSecurityGroup. Port
 lookup by member IP uses the fixed_ips query filter ("ip_address=...")—
 the `id` filter matches port UUIDs, not addresses. ICMP rules carry
 type/code in port_range_min/max, which are NOT ports."""
+import logging
 import warnings
 
 from huaweicloudsdkcore.auth.credentials import BasicCredentials
@@ -39,6 +40,8 @@ from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg
 from hcs_sg_iac.model.entities import Rule
 from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.model.portset import parse_ports
+
+_log = logging.getLogger(__name__)   # --verbose: wired by the CLI
 
 # Marker pagination page sizes (introspected: ListSecurityGroupsRequest,
 # NeutronListSecurityGroupRulesRequest and ListPortsRequest all expose
@@ -102,16 +105,25 @@ class HuaweiGateway:
 
     def _run(self, request):
         if not self._limiter.try_acquire():
+            _log.warning("budget exhausted; %s", self._limiter.snapshot())
             raise QuotaExhausted("service call budget exhausted for this "
                                  f"window; snapshot={self._limiter.snapshot()}",
                                  retry_at=self._limiter.snapshot()
                                          ["window_resets_at"])
-        method = getattr(self._sdk, _METHODS[type(request).__name__])
+        method_name = _METHODS[type(request).__name__]
+        method = getattr(self._sdk, method_name)
         try:
-            return method(request)
+            resp = method(request)
+            snap = self._limiter.snapshot()
+            _log.info("gateway call %s (%s/%s this window)",
+                      method_name, snap["used_calls"], snap["effective_limit"])
+            return resp
         except ServiceResponseException as e:
             if e.status_code == 429 or str(e.error_code or "").startswith("APIGW"):
                 self._limiter.report_external_throttle()
+                _log.warning("cloud throttle %s — our limit now %s",
+                             e.error_code,
+                             self._limiter.snapshot()["effective_limit"])
                 raise CloudThrottled(f"cloud throttled: {e.error_code} "
                                      f"{e.error_msg}",
                                      retry_at=self._limiter.snapshot()

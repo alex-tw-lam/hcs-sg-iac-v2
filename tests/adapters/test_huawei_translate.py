@@ -5,7 +5,8 @@ import warnings
 from types import SimpleNamespace
 
 import pytest
-from huaweicloudsdkcore.exceptions.exceptions import ServiceResponseException
+from huaweicloudsdkcore.exceptions.exceptions import (ClientRequestException,
+                                                      ServiceResponseException)
 
 from hcs_sg_iac.adapters.huawei_gateway import (HuaweiGateway, _METHODS,
                                                 _bounds, build_gateway)
@@ -152,6 +153,26 @@ def test_huawei_chokepoint_other_service_error_becomes_cloud_error():
     assert "404" in str(ei.value)
     assert "VPC.0404" in str(ei.value) and "not found" in str(ei.value)
     assert gw.quota_snapshot()["effective_limit"] == 4   # no shrink on plain errors
+
+
+def test_huawei_chokepoint_client_request_429_also_throttles_with_deadline():
+    """Real-shape regression (HCS HK environment): the SDK surfaces its
+    internal retry exhaustion as ClientRequestException(status_code=429,
+    error_code='429') — a ServiceResponseException subclass — not the
+    documented APIGW.* shape. The chokepoint must still translate it to
+    CloudThrottled carrying the window deadline, so the executor waits
+    and continues instead of crashing."""
+    def raise_429(req):
+        raise ClientRequestException(429, _sdk_error(
+            "429", "Max retries exceeded with url: /v2.0/"
+                   "security-group-rules?limit=500"))
+
+    gw = _gateway(raise_429, budget=4)
+    with pytest.raises(CloudThrottled) as ei:
+        gw.list_security_groups()
+    assert "429" in str(ei.value)
+    assert ei.value.retry_at == 1300.0
+    assert gw.quota_snapshot()["effective_limit"] == 2
 
 
 def test_ssl_verify_false_mutes_the_insecure_request_warning():
