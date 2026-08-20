@@ -8,6 +8,7 @@ import logging
 
 from hcs_sg_iac.model.actions import ActionList
 from hcs_sg_iac.model.common import CloudError, CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.gateway import CloudGateway, CloudReader
 from hcs_sg_iac.model.quota import QuotaPlan
 from hcs_sg_iac.usecases import apply as apply_uc
 from hcs_sg_iac.usecases import plan as plan_uc
@@ -19,7 +20,7 @@ _MAX_WAITS = 5  # per plan attempt: refuse to spin on a stuck window
 
 
 def plan_project(
-    load_project, gateway, project, *, sleep=None, notify=None
+    load_project, gateway: "CloudReader", project, *, sleep=None, notify=None
 ) -> "tuple[ActionList | None, list]":
     """The full planning pipeline. Returns (ActionList, []) on success,
     or (None, error lines) for any failure — load, validate, resolve, or
@@ -57,7 +58,7 @@ def plan_project(
 
 
 def plan_destroy_project(
-    gateway, name: str, *, sleep=None, notify=None
+    gateway: "CloudReader", name: str, *, sleep=None, notify=None
 ) -> ActionList:
     """Whole-SG teardown plan; the ActionList is empty when no cloud SG
     has that name (the caller decides how to report it). Same
@@ -76,7 +77,7 @@ def plan_destroy_project(
 
 
 def execute_confirmed(
-    gateway, al: ActionList, *, sleep=None, notify=None
+    gateway: "CloudGateway", al: ActionList, *, sleep=None, notify=None
 ) -> list:
     """The execute flow after a confirmed plan (--yes IS the consent).
     `sleep`/`notify` opt into wait-and-continue on rate exhaustion."""

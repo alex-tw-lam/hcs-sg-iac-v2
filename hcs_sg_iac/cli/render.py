@@ -3,6 +3,7 @@
 member→nic=, group→sg=, rule→rule=; "+ rule" rows without a cloud id
 print (new)."""
 
+import datetime
 import json
 
 _PREFIX = {"member": "nic=", "group": "sg=", "rule": "rule="}
@@ -151,8 +152,6 @@ def render_drift_lines(result: dict) -> tuple:
 def render_drift_json(result: dict, reference_file: str) -> dict:
     """The complete Liquibase-diff envelope (the --json document body):
     the whole wire shape lives in THIS ring, not split with the CLI."""
-    import datetime
-
     return {
         "diff": {
             "created": datetime.datetime.now(datetime.UTC).isoformat(),

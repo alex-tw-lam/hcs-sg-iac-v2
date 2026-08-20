@@ -170,7 +170,6 @@ class FakeGateway:
         self._rules.pop(rule_id)
         self._trace(f"delete_rule:{rule_id}")
 
-    # -- binder --
     def attach_nic(self, sg_id: str, port_id: str) -> None:
         self._spend(f"attach:{port_id}->{sg_id}")
         if port_id not in {n.port_id for n in self._nics}:
