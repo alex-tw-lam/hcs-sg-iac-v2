@@ -138,6 +138,12 @@ validate`/`plan`, not expressible in a per-file schema.
     .venv/bin/python -m pytest -v                    # fast suite (fake gateway)
     HCS_AK=... .venv/bin/python -m pytest -m cloud_contract   # real cloud
 
+The contract suite runs each exercise against the fake and (with
+credentials) the real cloud. The member bind/unbind exercise needs a
+real port id on the live cloud — export `HCS_CONTRACT_PORT=<spare test
+port id>` or it skips (attach appends to the port's SG list and detach
+removes only ours, so a spare port keeps its other groups).
+
 ## Architecture
 
 Clean architecture rings, AST-enforced (tests/test_architecture.py):

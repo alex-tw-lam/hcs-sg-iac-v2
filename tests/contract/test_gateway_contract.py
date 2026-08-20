@@ -1,6 +1,14 @@
 # tests/contract/test_gateway_contract.py
 """One behavioural suite, two gateways: the in-memory fake (always) and
-the real Huawei adapter (only with credentials). LSP, executable."""
+the real Huawei adapter (only with credentials). LSP, executable.
+
+Real-cloud notes learned on HCS 8.5.1:
+- creating an SG auto-adds self-referential rules (remote_group_id == the
+  new SG), so every rule assertion is against OUR created ids — never an
+  exact count of list_rules;
+- the fake seeds port "port-1", a real cloud has no such port: the member
+  bind/unbind exercise (CTRCT-04) runs against a port the operator names
+  via HCS_CONTRACT_PORT (skipped on real without it)."""
 import os
 
 import pytest
@@ -32,7 +40,7 @@ def _best_effort_cleanup(gw):
         sgs = {s.name: s.id for s in gw.list_security_groups()}
     except Exception:
         return
-    for name in ("contract", "contract-peer", "contract-2"):
+    for name in ("contract", "contract-peer", "contract-2", "contract-m"):
         sg_id = sgs.get(name)
         if not sg_id:
             continue
@@ -47,25 +55,29 @@ def _best_effort_cleanup(gw):
             pass
 
 
+def _ours(gw, sg_id, *created):
+    """list_rules filtered to the ids this run created — the real cloud
+    coexists them with the auto-added self rules (and anything else the
+    platform injects), so identity is by our ids, never by count."""
+    ids = {c.id for c in created}
+    return {r.id: r for r in gw.list_rules(sg_id) if r.id in ids}
+
+
 def _exercise(gw):
     try:
         sg = gw.create_security_group("contract", "d")
         assert any(s.name == "contract" for s in gw.list_security_groups())
-        gw.attach_nic(sg.id, "port-1")
-        assert [n.port_id for n in gw.list_attached_nics(sg.id)] == ["port-1"]
         rule = gw.create_rule(sg.id, Rule("ingress", "tcp", "22",
                                           RemoteCidr("203.0.113.0/24")))
-        rules = gw.list_rules(sg.id)
-        assert len(rules) == 1 and rules[0].id == rule.id
-        assert rules[0].remote_ip_prefix == "203.0.113.0/24"
+        rules = _ours(gw, sg.id, rule)
+        assert set(rules) == {rule.id}
+        assert rules[rule.id].remote_ip_prefix == "203.0.113.0/24"
         other = gw.create_security_group("contract-peer", "d")
         rr = gw.create_rule(sg.id, Rule("ingress", "tcp", "8080",
                                         RemoteGroup("contract-peer")))
         assert rr.remote_group_id == other.id      # id, not the name
         gw.delete_rule(rule.id)
-        assert len(gw.list_rules(sg.id)) == 1
-        gw.detach_nic(sg.id, "port-1")
-        assert gw.list_attached_nics(sg.id) == []
+        assert set(_ours(gw, sg.id, rule, rr)) == {rr.id}
         gw.delete_security_group(sg.id)
         assert not any(s.name == "contract" for s in gw.list_security_groups())
     finally:
@@ -86,7 +98,7 @@ def _exercise_extended(gw):
                                           RemoteCidr("203.0.113.0/24")))
         everything = gw.create_rule(sg.id, Rule("egress", "all", None,
                                                 RemoteCidr("0.0.0.0/0")))
-        rules = {r.id: r for r in gw.list_rules(sg.id)}
+        rules = _ours(gw, sg.id, udp, icmp, everything)
         assert set(rules) == {udp.id, icmp.id, everything.id}
         assert rules[udp.id].protocol == "udp"
         assert rules[udp.id].ports == "53"
@@ -96,9 +108,23 @@ def _exercise_extended(gw):
         assert rules[everything.id].ports is None
         for r in (udp, icmp, everything):
             gw.delete_rule(r.id)
-        assert gw.list_rules(sg.id) == []
+        assert _ours(gw, sg.id, udp, icmp, everything) == {}
         gw.delete_security_group(sg.id)
         assert not any(s.name == "contract-2" for s in gw.list_security_groups())
+    finally:
+        _best_effort_cleanup(gw)
+
+
+def _exercise_members(gw, port):
+    """The update-port bind/unbind round trip. attach must APPEND to the
+    port's existing SG list and detach must remove only ours — so on a
+    real cloud any spare port works and keeps its other SGs."""
+    sg = gw.create_security_group("contract-m", "d")
+    try:
+        gw.attach_nic(sg.id, port)
+        assert port in {n.port_id for n in gw.list_attached_nics(sg.id)}
+        gw.detach_nic(sg.id, port)
+        assert port not in {n.port_id for n in gw.list_attached_nics(sg.id)}
     finally:
         _best_effort_cleanup(gw)
 
@@ -140,3 +166,16 @@ def test_contract_extended_protocols(make_gw):          # CTRCT-02
 @pytest.mark.parametrize("make_gw", GATEWAYS)
 def test_contract_inventory_matches_per_sg_reads(make_gw):   # CTRCT-03
     _exercise_inventory(make_gw())
+
+
+@pytest.mark.parametrize("make_gw", GATEWAYS)
+def test_contract_member_bind_unbind(make_gw):          # CTRCT-04
+    gw = make_gw()
+    if make_gw is FakeGateway:
+        _exercise_members(gw, "port-1")     # the fake seeds it
+        return
+    port = os.environ.get("HCS_CONTRACT_PORT")
+    if not port:
+        pytest.skip("set HCS_CONTRACT_PORT=<id of a spare test port> to "
+                    "exercise member bind/unbind on the real cloud")
+    _exercise_members(gw, port)
