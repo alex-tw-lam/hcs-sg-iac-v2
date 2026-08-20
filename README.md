@@ -59,8 +59,14 @@ validate`/`plan`, not expressible in a per-file schema.
 - Cloud rules are immutable: edits are delete + create, shown honestly.
 - Rule edits create before delete (no transient coverage gap).
 - Rate-limit first: shared cloud quota is 90 calls / 5 min; this tool's
-  slice defaults to 25 per window (SERVICE_CALL_BUDGET). Exhausted →
-  actions marked throttled; re-running `apply` resumes (idempotent).
+  slice defaults to 25 per window (SERVICE_CALL_BUDGET). Exhausted or
+  cloud-throttled (429): the run waits out the window (notice on stderr)
+  and retries — it continues across windows instead of stopping; Ctrl+C
+  aborts. If the gateway can't report a retry deadline, remaining
+  actions are marked throttled and re-running `apply` resumes
+  (idempotent).
+- `SSL_VERIFY=false` also mutes the noisy Unverified-HTTPS warnings
+  (you already opted out; the tool won't nag about it on every call).
 - Every `--execute` run appends a record to `audit.jsonl` in the
   project directory (timestamp, actions, created cloud ids, quota).
 - Whole-group deletion only via explicit `destroy` (typed-name

@@ -5,6 +5,7 @@ writes."""
 import argparse
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -118,13 +119,16 @@ def _confirm(prompt: str, expect: str, *, quiet: bool = False) -> bool:
 def _execute(gateway, al, *, prompt, expect, args, project):
     """Shared execute tail for apply and destroy: confirm (skipped by
     --yes) → audit sink → run. Returns the result list, or None when
-    confirmation declined."""
+    confirmation declined. Rate exhaustion waits out the window and
+    continues (notice on stderr; --json stdout stays pure data)."""
     confirm = ((lambda prompt, expect: True) if args.yes
                else (lambda prompt, expect: _confirm(prompt, expect,
                                                      quiet=args.json)))
-    return pipeline.execute_confirmed(gateway, al, prompt=prompt, expect=expect,
-                                      confirm=confirm,
-                                      audit=_audit_factory(project, gateway))
+    return pipeline.execute_confirmed(
+        gateway, al, prompt=prompt, expect=expect, confirm=confirm,
+        audit=_audit_factory(project, gateway),
+        sleep=time.sleep,
+        notify=lambda msg: print(f"hcs-sg: {msg}", file=sys.stderr))
 
 
 def _finish(gateway, al, results, args) -> int:

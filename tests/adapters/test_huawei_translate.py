@@ -1,13 +1,14 @@
 # tests/adapters/test_huawei_translate.py
 """Pure translation helpers + the limiter chokepoint, tested against a
 stub SDK (never a real network)."""
+import warnings
 from types import SimpleNamespace
 
 import pytest
 from huaweicloudsdkcore.exceptions.exceptions import ServiceResponseException
 
 from hcs_sg_iac.adapters.huawei_gateway import (HuaweiGateway, _METHODS,
-                                                _bounds)
+                                                _bounds, build_gateway)
 from hcs_sg_iac.adapters.ratelimit import FixedWindowLimiter
 from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
 
@@ -121,6 +122,7 @@ def test_huawei_chokepoint_429_becomes_throttled_and_halves_limit():
     with pytest.raises(CloudThrottled) as ei:
         gw.list_security_groups()
     assert "APIGW.0301" in str(ei.value)
+    assert ei.value.retry_at == 1300.0   # frozen clock 1000 + 300s window
     assert gw.quota_snapshot()["effective_limit"] == 2   # 4 // 2: halved
 
 
@@ -134,8 +136,9 @@ def test_huawei_chokepoint_budget_exhaustion_short_circuits_sdk():
     gw = _gateway(ok, budget=1)
     gw.list_security_groups()
     assert len(calls) == 1
-    with pytest.raises(QuotaExhausted):
+    with pytest.raises(QuotaExhausted) as ei:
         gw.list_security_groups()
+    assert ei.value.retry_at == 1300.0   # wait-and-continue deadline
     assert len(calls) == 1          # budget guard fired BEFORE any SDK call
 
 
@@ -149,6 +152,29 @@ def test_huawei_chokepoint_other_service_error_becomes_cloud_error():
     assert "404" in str(ei.value)
     assert "VPC.0404" in str(ei.value) and "not found" in str(ei.value)
     assert gw.quota_snapshot()["effective_limit"] == 4   # no shrink on plain errors
+
+
+def test_ssl_verify_false_mutes_the_insecure_request_warning():
+    """SSL_VERIFY=false opts out of TLS verification; the SDK's requests
+    layer would then spam urllib3 InsecureRequestWarning on every call.
+    build_gateway mutes exactly that message via stdlib warnings (no
+    urllib3 import — the adapter keeps its designated-lib purity); with
+    verification on, the warning stays loud."""
+    cfg = SimpleNamespace(hcs_ak="a", hcs_sk="s", hcs_project_id="p",
+                          hcs_endpoint="https://x", ca_bundle="",
+                          ssl_verify=False, budget=1)
+
+    def _caught_build_and_warn():
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            build_gateway(cfg)
+            warnings.warn("Unverified HTTPS request is being made to host 'x'")
+            return [str(w.message) for w in caught
+                    if "Unverified HTTPS request" in str(w.message)]
+
+    assert _caught_build_and_warn() == []          # muted when opted out
+    cfg.ssl_verify = True
+    assert _caught_build_and_warn()                # control: stays visible
 
 
 # -- find_nics_by_ip: filter by fixed_ips, never by port UUID --

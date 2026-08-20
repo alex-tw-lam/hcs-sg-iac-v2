@@ -10,7 +10,7 @@ from hcs_sg_iac.model.entities import (DesiredState, Group, Member, Rule,
 from hcs_sg_iac.model.errors import CloudError
 from hcs_sg_iac.model.remote import RemoteCidr
 from hcs_sg_iac.usecases.apply import execute
-from tests.helpers import plan_state
+from tests.helpers import ExhaustOnce, plan_state
 
 
 def test_audit_receives_one_record_per_apply():
@@ -24,6 +24,26 @@ def test_audit_receives_one_record_per_apply():
     execute(al, sg_writer=gw, rule_writer=None, binder=None,
             audit=seen.append)
     assert len(seen) == 1 and "actions" in seen[0]
+
+
+def test_budget_exhaustion_waits_for_the_window_and_continues():
+    """EXEC-06 pins the classic no-sleep path (throttle the rest, re-run
+    resumes); unique here: with a sleep hook and a retry_at deadline the
+    SAME action is retried after the wait, the run completes, and the
+    notice fires once. Without the hook the classic path still holds."""
+    al = ActionList(actions=(Action("+", "group", "a", "", None, CreateSg("d")),),
+                    unmanaged=(), overlap=())
+    slept, notes = [], []
+    results = execute(al, sg_writer=ExhaustOnce(delay=60), rule_writer=None,
+                      binder=None, sleep=slept.append, notify=notes.append)
+    assert [r.status for r in results] == ["ok"]
+    assert len(slept) == 1 and 55 <= slept[0] <= 65   # ~ the 60s deadline
+    assert len(notes) == 1 and "waiting" in notes[0]
+    # no sleep hook injected -> classic throttle-and-skip, nothing run
+    gw = ExhaustOnce()
+    results = execute(al, sg_writer=gw, rule_writer=None, binder=None)
+    assert [r.status for r in results] == ["throttled"]
+    assert gw.call_log == []
 
 
 def test_throttled_then_resume_completes_only_the_remainder():

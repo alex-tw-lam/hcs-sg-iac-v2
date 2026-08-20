@@ -37,16 +37,18 @@ def plan_destroy_project(gateway, name: str) -> ActionList:
 
 
 def execute_confirmed(gateway, al: ActionList, *, prompt: str, expect: str,
-                      confirm, audit) -> "list | None":
+                      confirm, audit, sleep=None, notify=None) -> "list | None":
     """The execute flow after a plan: confirmation gate → audit sink →
     run. `confirm` is the presentation's (prompt, expect) -> bool hook;
     `audit` is a zero-arg factory so the sink (and its quota context) is
-    captured only when a run really starts. Returns one ActionResult per
-    action, or None when confirmation declined."""
+    captured only when a run really starts. `sleep`/`notify` opt into
+    wait-and-continue on rate exhaustion (see usecases/apply.py). Returns
+    one ActionResult per action, or None when confirmation declined."""
     if not confirm(prompt, expect):
         return None
     return apply_uc.execute(al, sg_writer=gateway, rule_writer=gateway,
-                            binder=gateway, audit=audit())
+                            binder=gateway, audit=audit(),
+                            sleep=sleep, notify=notify)
 
 
 def quota(gateway, actions) -> dict:

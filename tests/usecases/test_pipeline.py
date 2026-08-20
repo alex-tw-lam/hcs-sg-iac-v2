@@ -3,10 +3,12 @@
 confirmation hook and audit sink. The CLI is one consumer; these tests
 pin the pipeline's contract for future presentation layers."""
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
+from hcs_sg_iac.model.actions import Action, ActionList, CreateSg
 from hcs_sg_iac.model.cloud import CloudNic, CloudSg
 from hcs_sg_iac.model.entities import DesiredState, Group, Member
 from hcs_sg_iac.model.report import Report
 from hcs_sg_iac.usecases import pipeline
+from tests.helpers import ExhaustOnce
 
 
 def _state():
@@ -84,3 +86,19 @@ def test_execute_confirmed_prompts_then_runs_and_audits():
     assert seen == {"prompt": "Apply the changes above", "expect": "yes"}
     assert [r.status for r in results] == ["ok", "ok"]
     assert len(records) == 1            # one audit record after the run
+
+
+def test_execute_confirmed_forwards_the_wait_hooks():
+    """apply's wait-and-continue only engages when the presentation
+    forwards sleep/notify; unique here: the plumbing (exhaustion is
+    retried to ok through execute_confirmed, audit still fires)."""
+    slept, notes, audits = [], [], []
+    al = ActionList(actions=(Action("+", "group", "a", "", None, CreateSg("d")),),
+                    unmanaged=(), overlap=())
+    results = pipeline.execute_confirmed(
+        ExhaustOnce(delay=60), al, prompt="Apply the changes above",
+        expect="yes", confirm=lambda p, e: True,
+        audit=lambda: audits.append, sleep=slept.append, notify=notes.append)
+    assert [r.status for r in results] == ["ok"]
+    assert len(slept) == 1 and 55 <= slept[0] <= 65
+    assert notes and len(audits) == 1
