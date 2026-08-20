@@ -3,7 +3,8 @@
 CLI e2e and the contract suite. call_log records every write."""
 import logging
 
-from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg
+from hcs_sg_iac.model.cloud import (CloudNic, CloudRule, CloudSg,
+                                     Snapshot)
 from hcs_sg_iac.model.errors import CloudError, QuotaExhausted
 
 _log = logging.getLogger(__name__)   # --verbose: wired by the CLI
@@ -59,6 +60,21 @@ class FakeGateway:
     def list_attached_nics(self, sg_id: str) -> list:
         _log.info("gateway call list_attached_nics")
         return [n for n in self._nics if (sg_id, n.port_id) in self._attached]
+
+    def inventory(self) -> "tuple[Snapshot, dict]":
+        """In-memory fast path — parity with HuaweiGateway.inventory so
+        the contract suite cross-checks the same seam on both."""
+        _log.info("gateway call inventory")
+        rules = {sg.id: [r for r in self._rules.values()
+                         if r.sg_id == sg.id]
+                 for sg in self._sgs.values()}
+        attached = {sg.id: self.list_attached_nics(sg.id)
+                    for sg in self._sgs.values()}
+        nics: dict = {}
+        for n in self._nics:
+            nics.setdefault(n.ip, []).append(n)
+        return (Snapshot(sgs=tuple(self._sgs.values()), rules=rules,
+                         attached=attached), nics)
 
     # -- SgWriter --
     def create_security_group(self, name: str, description: str) -> CloudSg:
