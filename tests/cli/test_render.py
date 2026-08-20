@@ -4,6 +4,7 @@ in the frame catalogue (tests/specs/frames.py)."""
 import json
 
 from hcs_sg_iac.cli.render import render_json, render_plan
+from hcs_sg_iac.model.quota import QuotaPlan
 from hcs_sg_iac.model.actions import Action, ActionList, ActionResult
 
 
@@ -25,13 +26,13 @@ def test_json_shape():
     """REND-03 pins summary/quota/unmanaged/overlap for its own data and
     ACT-01 the counting; unique here: the per-action entry shape and the
     prefixed cloud_id, plus non-empty info passthrough."""
-    out = render_json(_al(), quota={"needed": 8, "left": 22})
+    out = render_json(_al(), quota=QuotaPlan(needed=8, left=22))
     data = json.loads(out)
     assert data["actions"][0] == {"action": "+", "type": "member",
                                   "group": "web-tier",
                                   "detail": "ip 10.0.1.12 (vm=web-01)",
                                   "cloud_id": "nic=abc-123"}
-    assert data["quota"] == {"needed": 8, "left": 22}
+    assert data["quota"] == {"needed": 8, "left": 22}  # shape pinned
     assert data["unmanaged"] and data["overlap"]
 
 
@@ -60,7 +61,7 @@ def test_unmatched_plan_row_renders_dash_and_new_renders():
         Action("+", "rule", "g", "ingress tcp 22 from cidr:0.0.0.0/0",
                None, None),
     ), unmanaged=(), overlap=())
-    out = render_plan(al, quota={}, executed=[], dry_run=False)
+    out = render_plan(al, quota=None, executed=[], dry_run=False)
     assert "(new)" in out
     group_line = next(l for l in out.splitlines() if "sg=s1" in l)
     assert group_line.rstrip().endswith("-")
@@ -73,9 +74,9 @@ def test_falsy_quota_omits_table_line():
 
 
 def test_unknown_quota_left_renders_remaining_unknown():
-    out = render_plan(_al(), quota={"needed": 8, "left": None}, dry_run=True)
+    out = render_plan(_al(), quota=QuotaPlan(needed=8, left=None), dry_run=True)
     assert "Quota: 8 calls needed, remaining unknown." in out
     assert "None left" not in out
     assert json.loads(
-        render_json(_al(), quota={"needed": 8, "left": None}))["quota"]["left"] \
+        render_json(_al(), quota=QuotaPlan(needed=8, left=None)))["quota"]["left"] \
         is None

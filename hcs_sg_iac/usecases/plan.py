@@ -31,7 +31,7 @@ def read_snapshot(sg_reader, membership_reader) -> Snapshot:
     (fake gateway, any future adapter)."""
     _log.info("phase: reading cloud snapshot")
     if hasattr(sg_reader, "inventory"):
-        return sg_reader.inventory()[0]
+        return sg_reader.inventory().snapshot
     sgs = tuple(sg_reader.list_security_groups())
     rules, attached = {}, {}
     for sg in sgs:
@@ -39,23 +39,6 @@ def read_snapshot(sg_reader, membership_reader) -> Snapshot:
         rules[sg.id] = list(sg_reader.list_rules(sg.id))
         attached[sg.id] = list(membership_reader.list_attached_nics(sg.id))
     return Snapshot(sgs=sgs, rules=rules, attached=attached)
-
-
-def _cloud_rule_identity(cr: CloudRule, id_to_name: dict):
-    if cr.remote_group_id:
-        remote = RemoteGroup(name=id_to_name.get(cr.remote_group_id,
-                                                 cr.remote_group_id))
-    elif cr.remote_ip_prefix:
-        try:
-            remote = RemoteCidr(cidr=cr.remote_ip_prefix)
-        except ValueError:
-            # e.g. an IPv6 remote our IPv4-only model cannot express:
-            # an identity no code rule can ever match -> honest delete.
-            remote = RemoteGroup(name=f"unrepresentable-remote"
-                                      f"({cr.remote_ip_prefix})")
-    else:
-        remote = RemoteCidr(cidr="0.0.0.0/0")     # API default when unset
-    return (cr.direction, cr.protocol or "all", cr.ports, remote)
 
 
 def _sub_rules(rule: Rule) -> tuple:
@@ -68,7 +51,7 @@ def _sub_rules(rule: Rule) -> tuple:
         return (rule,)
     return tuple(Rule(direction=rule.direction, protocol=rule.protocol,
                       ports=p, remote=rule.remote)
-                 for p in rule.ports.split(","))
+                 for p in rule.ports.entries)
 
 
 def _fmt_rule_detail(direction: str, protocol: str, ports, remote) -> str:
@@ -85,7 +68,7 @@ def _rule_detail(rule: Rule) -> str:
 
 
 def _cloud_rule_detail(cr: CloudRule, id_to_name: dict) -> str:
-    direction, protocol, ports, remote = _cloud_rule_identity(cr, id_to_name)
+    direction, protocol, ports, remote = cr.identity(id_to_name)
     return _fmt_rule_detail(direction, protocol, ports, remote)
 
 
@@ -183,8 +166,7 @@ def plan(state: DesiredState, resolution: Resolution, snapshot: Snapshot) -> Act
             subs = list({s.identity(): s
                          for r in wanted for s in _sub_rules(r)}.values())
             wanted_ids = {s.identity() for s in subs}
-            cloud_ids = {_cloud_rule_identity(r, id_to_name)
-                         for r in cloud_now}
+            cloud_ids = {r.identity(id_to_name) for r in cloud_now}
             for s in subs:
                 if s.identity() not in cloud_ids:
                     actions.append(Action(
@@ -199,7 +181,7 @@ def plan(state: DesiredState, resolution: Resolution, snapshot: Snapshot) -> Act
             # convergence must not strip the cloud's own defaults, not
             # even for a managed [] direction.
             stale = [cr for cr in cloud_now
-                     if _cloud_rule_identity(cr, id_to_name) not in wanted_ids
+                     if cr.identity(id_to_name) not in wanted_ids
                      and cr.remote_group_id != own_id]
             for cr in stale:
                 actions.append(Action(

@@ -134,7 +134,8 @@ def _exercise_inventory(gw):
     the SAME cloud — the strongest real-cloud validation of the snapshot
     optimisation (SG set, per-SG rules, per-SG membership, and the NIC
     index). Slow path sampled to 5 SGs to bound the call cost."""
-    snap, nics_by_ip = gw.inventory()
+    inv = gw.inventory()
+    snap, nics_by_ip = inv.snapshot, inv.nics_by_ip
     slow_sgs = {s.id for s in gw.list_security_groups()}
     assert {s.id for s in snap.sgs} == slow_sgs, \
         "inventory SG set disagrees with per-SG read"

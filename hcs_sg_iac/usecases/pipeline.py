@@ -9,6 +9,7 @@ import logging
 
 from hcs_sg_iac.model.actions import ActionList
 from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.quota import QuotaPlan
 from hcs_sg_iac.usecases import apply as apply_uc
 from hcs_sg_iac.usecases import plan as plan_uc, resolve, validate
 
@@ -89,13 +90,10 @@ def execute_confirmed(gateway, al: ActionList, *, prompt: str, expect: str,
                             sleep=sleep, notify=notify)
 
 
-def quota(gateway, actions) -> dict:
+def quota(gateway, actions) -> QuotaPlan:
     """Calls needed vs budget left; left is None for gateways without a
     quota snapshot."""
     snap = getattr(gateway, "quota_snapshot", None)
-    left = None
-    if snap:
-        s = snap()
-        left = s["effective_limit"] - s["used_calls"]
+    left = snap().left if snap else None
     needed = sum(1 for a in actions if a.op is not None)
-    return {"needed": needed, "left": left}
+    return QuotaPlan(needed=needed, left=left)

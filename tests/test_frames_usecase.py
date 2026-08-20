@@ -17,6 +17,7 @@ from hcs_sg_iac.usecases import apply as apply_uc
 from hcs_sg_iac.usecases import importer as import_uc
 from hcs_sg_iac.usecases import pipeline, resolve as resolve_uc, \
     validate as validate_uc
+from hcs_sg_iac.model.quota import QuotaPlan
 from hcs_sg_iac.model.remote import RemoteGroup
 from tests.specs.builders import check_cloud, make_project, remote_from_tag, \
     seed_gateway
@@ -150,8 +151,7 @@ def test_frame(frame, tmp_path):
             assert gw.call_log == frame.expect_call_log, (frame.id, gw.call_log)
 
     elif usecase == "import":
-        snap, _ = gw.inventory()
-        imp = import_uc.import_snapshot(snap)
+        imp = import_uc.import_snapshot(gw.inventory().snapshot)
         want = frame.expect_value or {}
         assert sorted(imp.groups) == want["groups"], frame.id
         for gname, ips in want.get("members", {}).items():
@@ -175,7 +175,8 @@ def test_frame(frame, tmp_path):
 
     elif usecase in ("render_plan", "render_exec", "render_json"):
         al = _plan(gw, root)
-        quota = (frame.model_input or {}).get("quota")
+        q = (frame.model_input or {}).get("quota")
+        quota = QuotaPlan(**q) if q else None
         if usecase == "render_plan":
             out = render.render_plan(al, quota=quota, dry_run=True)
         elif usecase == "render_exec":

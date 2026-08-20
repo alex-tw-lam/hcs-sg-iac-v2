@@ -2,11 +2,11 @@
 """Ports grammar — identical to Huawei multiport: "80", "22,443", "8000-9000".
 
 Accepts str / int / list input, normalises to the canonical sorted+merged
-string. None (or empty input) means ALL ports. This module is the single
+PortSet. None (or empty input) means ALL ports. This module is the single
 parser: model entities parse user input at construction, and the huawei
-adapter translates wire port ranges back through it. The plan engine
-consumes the canonical strings without re-parsing (sub-rule expansion
-just splits on ",").
+adapter translates wire port ranges back through it. PortSet owns the
+grammar OPERATIONS too (sub-rule expansion, wire bounds) — previously
+scattered as string surgery in plan.py and huawei_gateway.py.
 """
 from dataclasses import dataclass
 
@@ -17,13 +17,31 @@ class PortError(Exception):
     pass
 
 
+class PortSet(str):
+    """A canonical ports spec. Subclasses str so it serialises, compares
+    and displays as the canonical string everywhere (snapshot JSON,
+    identity tuples, frame expectations) while owning the grammar ops."""
+    __slots__ = ()
+
+    @property
+    def entries(self) -> "tuple[str, ...]":
+        """Comma-separated entries, ranges intact — the plan engine's
+        sub-rule expansion ("22,443" -> "22", "443"; "80-90" stays)."""
+        return tuple(self.split(",")) if self else ()
+
+    def bounds(self, entry: str) -> "tuple[int, int]":
+        """(lo, hi) of ONE entry — the wire translation."""
+        lo_s, _, hi_s = entry.partition("-")
+        return int(lo_s), int(hi_s or lo_s)
+
+
 @dataclass(frozen=True)
 class _Range:
     lo: int
     hi: int
 
 
-def parse_ports(value, *, field: str = "ports") -> "str | None":
+def parse_ports(value, *, field: str = "ports") -> "PortSet | None":
     if value is None:
         return None
     if isinstance(value, bool):
@@ -73,4 +91,5 @@ def parse_ports(value, *, field: str = "ports") -> "str | None":
     if len(merged) > _MAX_ENTRIES:
         raise PortError(f"{field}: at most {_MAX_ENTRIES} port entries "
                         f"(Huawei multiport cap), got {len(merged)}")
-    return ",".join(str(r.lo) if r.lo == r.hi else f"{r.lo}-{r.hi}" for r in merged)
+    return PortSet(",".join(str(r.lo) if r.lo == r.hi else f"{r.lo}-{r.hi}"
+                            for r in merged))
