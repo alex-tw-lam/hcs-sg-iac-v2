@@ -20,7 +20,9 @@ def _row(cells: list, widths: list) -> str:
     ).rstrip()
 
 
-def render_plan(al, quota=None, executed=None, dry_run: bool = True) -> str:
+def _table(al, executed) -> list:
+    """The plan table: header + one aligned row per action, with the
+    RESULT column paired by key when execution results are given."""
     headers = ["ACTION", "TYPE", "GROUP", "DETAIL", "CLOUD ID"]
     if executed is not None:
         headers.append("RESULT")
@@ -45,9 +47,11 @@ def render_plan(al, quota=None, executed=None, dry_run: bool = True) -> str:
         max(len(str(r[i])) for r in [headers, *rows])
         for i in range(len(headers))
     ]
-    lines = [_row(headers, widths)]
-    for row in rows:
-        lines.append(_row(row, widths))
+    return [_row(headers, widths)] + [_row(row, widths) for row in rows]
+
+
+def render_plan(al, quota=None, executed=None, dry_run: bool = True) -> str:
+    lines = _table(al, executed)
 
     s = al.summary()
     lines.append("")

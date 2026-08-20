@@ -1,9 +1,9 @@
 # tests/test_metrics.py
-"""Complexity & maintainability ratchet (radon): every file stays at
-maintainability rank A, and the D/F complexity club may not gain new
-members. The two known F hot spots (cli main(), plan()) are the pending
-split-main refactor — the ratchet guarantees they cannot quietly grow
-a crowd while nobody watches."""
+"""Complexity & maintainability gate (radon) — a HARD threshold since
+the v0.6.3 refactor emptied the D/F club: every block stays at
+cyclomatic rank C or better (complexity <= 20) and every file keeps
+maintainability rank A. A violation means: refactor it, don't bump the
+threshold."""
 
 import pathlib
 
@@ -12,17 +12,6 @@ from radon.metrics import mi_rank, mi_visit
 
 PKG = pathlib.Path(__file__).resolve().parents[1] / "hcs_sg_iac"
 
-# blocks at radon rank D/F today, keyed by file name (the ratchet floor:
-# these may improve/disappear, nothing else may join)
-DF_CLUB = {
-    "main.py": {"main"},
-    "plan.py": {"plan"},
-    "portset.py": {"parse_ports"},
-    "apply.py": {"execute"},
-    "importer.py": {"import_snapshot"},
-    "render.py": {"render_plan"},
-}
-
 
 def test_maintainability_stays_rank_a():
     for path in PKG.rglob("*.py"):
@@ -30,14 +19,11 @@ def test_maintainability_stays_rank_a():
         assert mi_rank(mi) == "A", (path, mi)
 
 
-def test_no_new_def_ranked_blocks():
+def test_no_block_above_rank_c():
     for path in PKG.rglob("*.py"):
-        allowed = DF_CLUB.get(path.name, set())
         for block in cc_visit(path.read_text(encoding="utf-8")):
             rank = cc_rank(block.complexity)
-            if rank in "DEF":
-                assert block.name in allowed, (
-                    f"{path.name}:{block.name} joined the D/F complexity "
-                    f"club (rank {rank}, {block.complexity}) — refactor it "
-                    f"or deliberately add it to the ratchet"
-                )
+            assert rank not in "DEF", (
+                f"{path.name}:{block.name} is rank {rank} "
+                f"(complexity {block.complexity}) — refactor it below 21"
+            )

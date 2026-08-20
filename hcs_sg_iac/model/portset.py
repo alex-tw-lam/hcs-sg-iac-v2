@@ -43,6 +43,42 @@ class _Range:
     hi: int
 
 
+def _parse_entry(raw: str, field: str) -> _Range:
+    """One ports entry ("80" | "8000-9000") -> _Range; PortError with
+    the caller's field context."""
+    raw = raw.strip()
+    if not raw:
+        raise PortError(f"{field}: empty entry in ports list")
+    if "-" in raw:
+        lo_s, hi_s = raw.split("-", 1)
+        if not (lo_s.strip().isascii() and lo_s.strip().isdigit()) or not (
+            hi_s.strip().isascii() and hi_s.strip().isdigit()
+        ):
+            raise PortError(f"{field}: bad port range {raw!r}")
+        lo, hi = int(lo_s), int(hi_s)
+    else:
+        if not (raw.isascii() and raw.isdigit()):
+            raise PortError(f"{field}: bad port {raw!r}")
+        lo = hi = int(raw)
+    if not (1 <= lo <= 65535 and 1 <= hi <= 65535):
+        raise PortError(f"{field}: port out of range 1-65535: {raw!r}")
+    if lo > hi:
+        raise PortError(f"{field}: reversed range {raw!r}")
+    return _Range(lo, hi)
+
+
+def _merge(ranges: list) -> list:
+    """Sort and merge adjacent/overlapping ranges (the union)."""
+    ranges.sort(key=lambda r: (r.lo, r.hi))
+    merged: list = []
+    for r in ranges:
+        if merged and r.lo <= merged[-1].hi + 1:
+            merged[-1] = _Range(merged[-1].lo, max(merged[-1].hi, r.hi))
+        else:
+            merged.append(r)
+    return merged
+
+
 def parse_ports(value, *, field: str = "ports") -> "PortSet | None":
     if value is None:
         return None
@@ -59,38 +95,9 @@ def parse_ports(value, *, field: str = "ports") -> "PortSet | None":
         raise PortError(
             f"{field}: expected string/int/list, got {type(value).__name__}"
         )
-
-    ranges: list = []
-    for raw in items:
-        raw = raw.strip()
-        if not raw:
-            raise PortError(f"{field}: empty entry in ports list")
-        if "-" in raw:
-            lo_s, hi_s = raw.split("-", 1)
-            if not (lo_s.strip().isascii() and lo_s.strip().isdigit()) or not (
-                hi_s.strip().isascii() and hi_s.strip().isdigit()
-            ):
-                raise PortError(f"{field}: bad port range {raw!r}")
-            lo, hi = int(lo_s), int(hi_s)
-        else:
-            if not (raw.isascii() and raw.isdigit()):
-                raise PortError(f"{field}: bad port {raw!r}")
-            lo = hi = int(raw)
-        if not (1 <= lo <= 65535 and 1 <= hi <= 65535):
-            raise PortError(f"{field}: port out of range 1-65535: {raw!r}")
-        if lo > hi:
-            raise PortError(f"{field}: reversed range {raw!r}")
-        ranges.append(_Range(lo, hi))
-
-    if not ranges:
+    if not items:
         return None
-    ranges.sort(key=lambda r: (r.lo, r.hi))
-    merged: list = []
-    for r in ranges:
-        if merged and r.lo <= merged[-1].hi + 1:
-            merged[-1] = _Range(merged[-1].lo, max(merged[-1].hi, r.hi))
-        else:
-            merged.append(r)
+    merged = _merge([_parse_entry(raw, field) for raw in items])
     if len(merged) == 1 and merged[0].lo == 1 and merged[0].hi == 65535:
         return None  # full range is semantically all ports
     if len(merged) > _MAX_ENTRIES:

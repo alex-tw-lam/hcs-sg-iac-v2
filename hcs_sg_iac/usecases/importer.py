@@ -46,47 +46,53 @@ class ImportedState:
     notes: tuple = ()  # every skip, human-readable
 
 
-def import_snapshot(snap: Snapshot) -> ImportedState:
+def _representable(snap: Snapshot) -> "tuple[dict, list]":
+    """Which cloud SGs can become a config file at all: sg_id -> name
+    (the FIRST occurrence of a duplicate name wins; losers noted)."""
     notes: list = []
-    id_to_name = {s.id: s.name for s in snap.sgs}
-
-    def ordered():  # deterministic output order
-        return sorted(snap.sgs, key=lambda s: (s.name, s.id))
-
-    # pass 1: which cloud SGs are representable at all
-    representable: dict = {}  # sg_id -> name (first name wins)
+    representable: dict = {}
     by_name: dict = {}  # name -> winning sg_id
-    for sg in ordered():
+    for sg in sorted(snap.sgs, key=lambda s: (s.name, s.id)):
         if not GROUP_NAME_RE.fullmatch(sg.name):
             notes.append(
                 f"skip group {sg.name!r} ({sg.id}): name cannot "
                 f"become a config file (must match "
                 f"{GROUP_NAME_RE.pattern})"
             )
-            continue
-        if sg.name in by_name:
+        elif sg.name in by_name:
             notes.append(
                 f"skip group {sg.name!r} ({sg.id}): duplicate "
                 f"cloud name — config keys groups by name "
                 f"(kept {by_name[sg.name]})"
             )
-            continue
-        by_name[sg.name] = sg.id
-        representable[sg.id] = sg.name
+        else:
+            by_name[sg.name] = sg.id
+            representable[sg.id] = sg.name
+    return representable, notes
 
-    # pass 2: entities for the representable ones
+
+def _members(nics) -> tuple:
+    """Attached NICs -> member IPs (v4 only, deduplicated)."""
+    members, seen = [], set()
+    for n in nics:
+        if not n.ip or "." not in n.ip or n.ip in seen:
+            continue  # no v4 address / same member twice
+        seen.add(n.ip)
+        members.append(Member(ip=n.ip))
+    return tuple(members)
+
+
+def import_snapshot(snap: Snapshot) -> ImportedState:
+    representable, notes = _representable(snap)
+    id_to_name = {s.id: s.name for s in snap.sgs}
+
     groups: dict = {}
     rules: dict = {}
-    for sg in ordered():
+    for sg in sorted(snap.sgs, key=lambda s: (s.name, s.id)):
         name = representable.get(sg.id)
         if name is None:
             continue
-        members, seen_ips = [], set()
-        for n in snap.attached.get(sg.id, ()):
-            if not n.ip or "." not in n.ip or n.ip in seen_ips:
-                continue  # no v4 address / same member twice
-            seen_ips.add(n.ip)
-            members.append(Member(ip=n.ip))
+        members = _members(snap.attached.get(sg.id, ()))
         wanted: dict = {"ingress": [], "egress": []}
         identities: dict = {"ingress": set(), "egress": set()}
         self_rules = 0
@@ -150,7 +156,7 @@ def import_snapshot(snap: Snapshot) -> ImportedState:
                 f"preserves them)"
             )
         groups[name] = Group(
-            name=name, description=sg.description, members=tuple(members)
+            name=name, description=sg.description, members=members
         )
         rules[name] = RulesFile(
             security_group=name,
