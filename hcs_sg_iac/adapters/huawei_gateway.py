@@ -11,6 +11,8 @@ description is set right after via NeutronUpdateSecurityGroup. Port
 lookup by member IP uses the fixed_ips query filter ("ip_address=...")—
 the `id` filter matches port UUIDs, not addresses. ICMP rules carry
 type/code in port_range_min/max, which are NOT ports."""
+import warnings
+
 from huaweicloudsdkcore.auth.credentials import BasicCredentials
 from huaweicloudsdkcore.exceptions.exceptions import (SdkException,
                                                       ServiceResponseException)
@@ -72,6 +74,13 @@ def build_gateway(config) -> "HuaweiGateway":
         http.ssl_ca_cert = config.ca_bundle
     else:
         http.ignore_ssl_verification = not config.ssl_verify
+        if not config.ssl_verify:
+            # Opted out of verification: the SDK's requests layer would
+            # spam urllib3 InsecureRequestWarning on EVERY call. Muted by
+            # message via stdlib warnings — importing urllib3 here would
+            # break the adapter's designated-third-party purity.
+            warnings.filterwarnings("ignore",
+                                    message="Unverified HTTPS request")
     sdk = (VpcClient.new_builder()
            .with_http_config(http)
            .with_credentials(BasicCredentials(config.hcs_ak, config.hcs_sk,
@@ -94,7 +103,9 @@ class HuaweiGateway:
     def _run(self, request):
         if not self._limiter.try_acquire():
             raise QuotaExhausted("service call budget exhausted for this "
-                                 f"window; snapshot={self._limiter.snapshot()}")
+                                 f"window; snapshot={self._limiter.snapshot()}",
+                                 retry_at=self._limiter.snapshot()
+                                         ["window_resets_at"])
         method = getattr(self._sdk, _METHODS[type(request).__name__])
         try:
             return method(request)
@@ -102,7 +113,9 @@ class HuaweiGateway:
             if e.status_code == 429 or str(e.error_code or "").startswith("APIGW"):
                 self._limiter.report_external_throttle()
                 raise CloudThrottled(f"cloud throttled: {e.error_code} "
-                                     f"{e.error_msg}") from e
+                                     f"{e.error_msg}",
+                                     retry_at=self._limiter.snapshot()
+                                             ["window_resets_at"]) from e
             raise CloudError(f"{e.status_code}: {e.error_code} {e.error_msg}") from e
         except SdkException as e:
             raise CloudError(str(e)) from e

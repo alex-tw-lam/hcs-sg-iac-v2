@@ -2,8 +2,14 @@
 """Execute an ActionList through the writer protocols. Sequential —
 the rate budget beats parallelism. Per-action isolation: a failure
 never aborts the run (dependents of a failed group create are skipped,
-not orphaned); quota exhaustion throttles the REST."""
+not orphaned); quota exhaustion throttles the REST — unless a `sleep`
+hook is injected (the CLI passes time.sleep): then an exhaustion that
+carries a retry deadline (QuotaExhausted.retry_at / CloudThrottled
+.retry_at, set by the gateway from the limiter window) waits for the
+window to roll over and RETRIES the same action, so a run continues
+across windows instead of stopping."""
 import datetime
+import time
 
 from hcs_sg_iac.model.actions import (ActionList, ActionResult,
                                       AttachNic, CreateRule, CreateSg,
@@ -15,10 +21,17 @@ from hcs_sg_iac.model.errors import CloudThrottled, QuotaExhausted
 _ORDER = {CreateSg: 0, UpdateSg: 1, CreateRule: 2, AttachNic: 3,
           DeleteRule: 4, DetachNic: 5, DeleteSg: 6}
 
+_MAX_WAITS = 5          # per action: refuse to spin on a stuck window
+
 
 def execute(action_list: ActionList, *, sg_writer, rule_writer, binder,
-            audit=None) -> list:
-    """Run every action with an op. Returns one ActionResult per action."""
+            audit=None, sleep=None, notify=None) -> list:
+    """Run every action with an op. Returns one ActionResult per action.
+
+    `sleep`/`notify` opt into wait-and-continue on rate exhaustion:
+    notify(msg) is called before each wait (the CLI prints to stderr);
+    without `sleep` the classic behaviour stands (mark throttled, skip
+    the rest — a re-run resumes, idempotent)."""
     ordered = sorted((a for a in action_list.actions if a.op is not None),
                      key=lambda a: _ORDER[type(a.op)])
     results: list = []
@@ -42,37 +55,53 @@ def execute(action_list: ActionList, *, sg_writer, rule_writer, binder,
                 action, "failed",
                 "group creation failed — skipping dependent"))
             continue
-        try:
-            if isinstance(op, CreateSg):
-                sg = sg_writer.create_security_group(action.group,
-                                                     op.description)
-                created_sg_ids[action.group] = sg.id
-            elif isinstance(op, UpdateSg):
-                sg_writer.update_security_group_description(op.sg_id,
-                                                            op.description)
-            elif isinstance(op, DeleteSg):
-                sg_writer.delete_security_group(op.sg_id)
-            elif isinstance(op, CreateRule):
-                rule_writer.create_rule(resolve_sg_id(action.group, op.sg_id),
-                                        op.rule)
-            elif isinstance(op, DeleteRule):
-                rule_writer.delete_rule(op.rule_id)
-            elif isinstance(op, AttachNic):
-                binder.attach_nic(resolve_sg_id(action.group, op.sg_id),
-                                  op.port_id)
-            elif isinstance(op, DetachNic):
-                binder.detach_nic(resolve_sg_id(action.group, op.sg_id),
-                                  op.port_id)
-            else:                                   # unreachable by construction
-                raise RuntimeError(f"unknown payload {type(op).__name__}")
-            results.append(ActionResult(action, "ok"))
-        except (QuotaExhausted, CloudThrottled) as e:
-            throttled = True
-            results.append(ActionResult(action, "throttled", str(e)))
-        except Exception as e:                      # noqa: BLE001 — isolate
-            if isinstance(op, CreateSg):
-                failed_creates.add(action.group)    # skip its dependents
-            results.append(ActionResult(action, "failed", str(e)))
+        waits = 0
+        while True:
+            try:
+                if isinstance(op, CreateSg):
+                    sg = sg_writer.create_security_group(action.group,
+                                                         op.description)
+                    created_sg_ids[action.group] = sg.id
+                elif isinstance(op, UpdateSg):
+                    sg_writer.update_security_group_description(op.sg_id,
+                                                                op.description)
+                elif isinstance(op, DeleteSg):
+                    sg_writer.delete_security_group(op.sg_id)
+                elif isinstance(op, CreateRule):
+                    rule_writer.create_rule(resolve_sg_id(action.group,
+                                                          op.sg_id), op.rule)
+                elif isinstance(op, DeleteRule):
+                    rule_writer.delete_rule(op.rule_id)
+                elif isinstance(op, AttachNic):
+                    binder.attach_nic(resolve_sg_id(action.group, op.sg_id),
+                                      op.port_id)
+                elif isinstance(op, DetachNic):
+                    binder.detach_nic(resolve_sg_id(action.group, op.sg_id),
+                                      op.port_id)
+                else:                               # unreachable by construction
+                    raise RuntimeError(f"unknown payload {type(op).__name__}")
+                results.append(ActionResult(action, "ok"))
+                break
+            except (QuotaExhausted, CloudThrottled) as e:
+                deadline = getattr(e, "retry_at", None)
+                if sleep is not None and deadline is not None \
+                        and waits < _MAX_WAITS:
+                    waits += 1
+                    wait_for = max(0.0, deadline - time.time())
+                    if notify:
+                        notify(f"rate window exhausted — waiting "
+                               f"{int(wait_for)}s, then continuing "
+                               f"(action {action.type} {action.group})")
+                    sleep(wait_for)
+                    continue                       # window rolled over: retry
+                throttled = True
+                results.append(ActionResult(action, "throttled", str(e)))
+                break
+            except Exception as e:                  # noqa: BLE001 — isolate
+                if isinstance(op, CreateSg):
+                    failed_creates.add(action.group)    # skip its dependents
+                results.append(ActionResult(action, "failed", str(e)))
+                break
 
     if audit is not None:
         audit({

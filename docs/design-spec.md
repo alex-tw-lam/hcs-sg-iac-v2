@@ -147,8 +147,13 @@ Apply is sequential, resumable and idempotent, and only ever runs under
 `--execute` (without it, `apply`/`destroy` are dry runs): every cloud write goes through
 the fixed-window rate limiter (same shared 90 calls / 5 min cloud quota as the
 sibling service; this tool takes a configurable budget slice, default 25).
-On budget exhaustion remaining actions are marked `throttled` and re-running
-`apply` resumes (same semantics as the sibling's 207-partial-resume design).
+On budget exhaustion or a cloud 429 the executor WAITS for the window to
+roll over (the exceptions carry `retry_at` from the limiter; the wait is
+noted on stderr) and retries the same action, so a run continues across
+windows instead of stopping (Ctrl+C aborts). When the gateway reports no
+retry deadline, the fallback marks remaining actions `throttled` and
+re-running `apply` resumes (same semantics as the sibling's
+207-partial-resume design).
 Every apply appends an append-only JSONL audit record (timestamp, project,
 actions, cloud IDs, quota snapshot).
 
@@ -297,7 +302,8 @@ Feasibility check against the real endpoint list is implementation step 0.
 - **Use case tests (pure)**: each validation rule; diff matrix — create/
   delete group, description change, member add/remove, rule create/delete,
   changed-rule-as-delete+create pair, unmanaged directions untouched,
-  `[]` destruction flagged for confirmation, throttle marking and resume.
+  `[]` destruction flagged for confirmation, rate-exhaustion
+  wait-and-retry (and the no-deadline throttle fallback).
 - **Adapter tests**: yaml loader (bad YAML → line numbers; dangling refs;
   filename≠name), gateway with a fake SDK client (request shaping, v1 port
   splitting, exception translation, limiter accounting).
