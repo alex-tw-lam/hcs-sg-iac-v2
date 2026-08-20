@@ -273,3 +273,22 @@ def test_cloud_only_group_is_inventoried(tmp_path):
         "'extra'" in u and "no security-groups/extra/" in u
         for u in al.unmanaged
     )
+
+
+def test_extra_cloud_member_is_detached(tmp_path):
+    """Membership truth is the IP list: a cloud-attached NIC the code
+    does not list gets a detach action."""
+    make_project(
+        tmp_path,
+        {"security-groups/web/group.yaml": "name: web\nmembers: []\n"},
+    )
+    gw = seed(
+        FakeGateway(),
+        sgs=(("sg-web", "web", ""),),
+        nics=(("10.0.1.10", "p1"),),
+        attached=(("sg-web", "p1"),),
+    )
+    al = plan_state(gw, _state(tmp_path))
+    assert [(a.sign, a.type, a.cloud_id) for a in al.actions] == [
+        ("-", "member", "p1")
+    ]

@@ -84,14 +84,7 @@ def execute_confirmed(
         "phase: executing %d confirmed actions",
         sum(1 for a in al.actions if a.op is not None),
     )
-    return apply_uc.execute(
-        al,
-        sg_writer=gateway,
-        rule_writer=gateway,
-        binder=gateway,
-        sleep=sleep,
-        notify=notify,
-    )
+    return apply_uc.execute(al, gateway=gateway, sleep=sleep, notify=notify)
 
 
 def quota(gateway, actions) -> QuotaPlan:

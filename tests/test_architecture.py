@@ -27,7 +27,6 @@ ADAPTER_THIRD_PARTY = {
 ALLOWED_INTERNAL = {"hcs_sg_iac"}
 
 
-# Per-ring allowed internal import prefixes (docs/architecture.md):
 # model imports itself; usecases add themselves; adapters add themselves
 # (huawei_gateway imports ratelimit — same ring, allowed); cli, the
 # outermost ring, may import anything in the package.

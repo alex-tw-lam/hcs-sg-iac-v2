@@ -99,7 +99,8 @@ Clean rings, one rule: imports point inward; inner rings never know
 outer ones exist.
 
     cli/        thin presentation — argv in, tables/JSON out
-    usecases/   the verbs — validate · resolve · plan · apply · pipeline
+    usecases/   the verbs — plan · apply · pipeline · resolve · drift ·
+                importer
     adapters/   the ONLY third-party ring — SDK, PyYAML, fakes, snapshots
     model/      the vocabulary — entities · actions · cloud · common
 

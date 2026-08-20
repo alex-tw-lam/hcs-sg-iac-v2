@@ -30,18 +30,9 @@ def _table(al, executed) -> list:
         [a.sign, a.type, a.group, a.detail, _display_id(a)] for a in al.actions
     ]
     if executed is not None:
-        by_key = {
-            (
-                r.action.sign,
-                r.action.type,
-                r.action.group,
-                r.action.detail,
-                r.action.cloud_id,
-            ): r
-            for r in executed
-        }
+        by_key = {r.action: r for r in executed}  # Action is frozen/hashable
         for row, a in zip(rows, al.actions, strict=True):
-            r = by_key.get((a.sign, a.type, a.group, a.detail, a.cloud_id))
+            r = by_key.get(a)
             row.append(r.status if r else "-")
     widths = [
         max(len(str(r[i])) for r in [headers, *rows])
@@ -118,3 +109,57 @@ def render_json(al, quota=None, executed=None) -> str:
             for r in executed
         ]
     return json.dumps(data, indent=2)
+
+
+def render_drift_lines(result: dict) -> tuple:
+    """Human text for a diff_inventory result — one line per change,
+    grouped '-/+'/'~' (the CLI prints; rc 1 when non-empty)."""
+    lines = []
+    for e in result["missing"]:
+        if e["type"] == "group":
+            lines.append(f"- group {e['name']} ({e['id']}) deleted")
+        elif e["type"] == "rule":
+            lines.append(f"- rule {e['id']} of {e['sg']}")
+        else:
+            lines.append(f"- member {e['id']} detached from {e['sg']}")
+    for e in result["unexpected"]:
+        if e["type"] == "group":
+            lines.append(f"+ group {e['name']} ({e['id']}) created")
+        elif e["type"] == "rule":
+            lines.append(f"+ rule {e['id']} of {e['sg']}")
+        else:
+            lines.append(f"+ member {e['id']} attached to {e['sg']}")
+    for e in result["changed"]:
+        d = {x["field"]: x for x in e["differences"]}
+        if e["type"] == "group":
+            if "name" in d:
+                lines.append(
+                    f"~ group {e['id']}: renamed "
+                    f"{d['name']['referenceValue']!r} -> "
+                    f"{d['name']['comparedValue']!r}"
+                )
+            if "description" in d:
+                lines.append(
+                    f"~ group {e['name']} ({e['id']}): " f"description changed"
+                )
+        else:
+            fields = ", ".join(d)
+            lines.append(f"~ rule {e['id']} of {e['sg']}: {fields} changed")
+    return tuple(lines)
+
+
+def render_drift_json(result: dict, reference_file: str) -> dict:
+    """The complete Liquibase-diff envelope (the --json document body):
+    the whole wire shape lives in THIS ring, not split with the CLI."""
+    import datetime
+
+    return {
+        "diff": {
+            "created": datetime.datetime.now(datetime.UTC).isoformat(),
+            "reference": {"kind": "snapshot", "file": reference_file},
+            "target": {"kind": "cloud"},
+            "missingObjects": result["missing"],
+            "unexpectedObjects": result["unexpected"],
+            "changedObjects": result["changed"],
+        }
+    }

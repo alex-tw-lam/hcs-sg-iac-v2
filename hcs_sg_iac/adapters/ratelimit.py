@@ -1,12 +1,5 @@
-# app/ratelimit.py
-"""Fixed-window rate limiter.
-
-Zero project imports (stdlib only) — this file can be copied into any
-project unmodified.
-
-Not thread-safe; safe on a single event loop (no await points). Wrap in
-a lock if called from threads.
-"""
+# hcs_sg_iac/adapters/ratelimit.py
+"""Fixed-window rate limiter. Not thread-safe; wrap in a lock if called from threads."""
 
 import time
 

@@ -23,6 +23,7 @@ from hcs_sg_iac.model.actions import (
 from hcs_sg_iac.model.cloud import Snapshot
 from hcs_sg_iac.model.common import RemoteGroup
 from hcs_sg_iac.model.entities import DesiredState, Rule
+from hcs_sg_iac.model.gateway import CloudReader
 from hcs_sg_iac.model.portset import PortSet
 from hcs_sg_iac.usecases.resolve import Resolution
 
@@ -34,7 +35,7 @@ def _q(s: str) -> str:
     return json.dumps(s)
 
 
-def read_snapshot(gateway) -> Snapshot:
+def read_snapshot(gateway: "CloudReader") -> Snapshot:
     """The observed cloud in one pass. inventory() is THE read seam
     (every gateway implements it); the old per-SG fallback loop died
     with the protocol sprawl."""
