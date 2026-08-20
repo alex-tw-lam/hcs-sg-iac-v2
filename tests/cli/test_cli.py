@@ -83,7 +83,7 @@ def test_plan_cloud_failure_is_one_clean_line(project, capsys):
     line with rc 1 — never a traceback (the raw-QuotaExhausted crash
     class of bugs)."""
     class BrokenGateway(FakeGateway):
-        def list_security_groups(self):
+        def inventory(self):              # the read path the CLI takes
             raise CloudError("VPC.0404 boom")
 
     gw = BrokenGateway()

@@ -15,21 +15,21 @@ from tests.helpers import ExhaustOnce
 
 
 class ExhaustReadsOnce(FakeGateway):
-    """list_security_groups raises QuotaExhausted carrying a retry
-    deadline on the FIRST call, then reads behave normally — the read
-    path's wait-and-continue shape."""
+    """inventory() (the read fast path every gateway with it takes)
+    raises QuotaExhausted carrying a retry deadline on the FIRST call,
+    then behaves normally — the read path's wait-and-continue shape."""
 
     def __init__(self, delay: float = 60.0):
         super().__init__()
         self._deadline = time.time() + delay
         self.raised = False
 
-    def list_security_groups(self):
+    def inventory(self):
         if not self.raised:
             self.raised = True
             raise QuotaExhausted("budget exhausted for this window",
                                  retry_at=self._deadline)
-        return super().list_security_groups()
+        return super().inventory()
 
 
 def _state():
@@ -133,7 +133,7 @@ def test_plan_project_waits_out_the_window_on_reads():
 
 def test_plan_project_cloud_error_is_a_clean_error_line():
     class Broken(FakeGateway):
-        def list_security_groups(self):
+        def inventory(self):              # the read path the CLI takes
             raise CloudError("VPC.0404 not found")
 
     empty_members = DesiredState(groups={"web": Group("web", "d", ())},
