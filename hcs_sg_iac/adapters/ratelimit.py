@@ -9,6 +9,8 @@ a lock if called from threads.
 """
 import time
 
+from hcs_sg_iac.model.quota import Quota
+
 
 class FixedWindowLimiter:
     """Allows up to `budget` calls per `window_seconds`.
@@ -51,11 +53,9 @@ class FixedWindowLimiter:
         self._rollover()
         self._limit_override = max(self._used, self._budget // 2)
 
-    def snapshot(self) -> dict:
+    def snapshot(self) -> Quota:
         self._rollover()
-        return {
-            "service_budget_calls": self._budget,
-            "used_calls": self._used,
-            "effective_limit": self.limit,
-            "window_resets_at": self._window_start + self._window,
-        }
+        return Quota(service_budget_calls=self._budget,
+                     used_calls=self._used,
+                     effective_limit=self.limit,
+                     window_resets_at=self._window_start + self._window)

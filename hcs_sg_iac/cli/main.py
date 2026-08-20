@@ -170,7 +170,8 @@ def _audit_factory(project: Path, gateway):
     return lambda: audit_adapter.enrich(
         audit_adapter.jsonl_sink(project / "audit.jsonl"),
         project=str(project.resolve()),
-        quota=gateway.quota_snapshot() if hasattr(gateway, "quota_snapshot") else None,
+        quota=gateway.quota_snapshot().asdict()
+               if hasattr(gateway, "quota_snapshot") else None,
     )
 
 
@@ -271,7 +272,7 @@ def main(argv=None, gateway=None) -> int:
             return 1
         _log.info("phase: importing from %s", src)
         imported = importer.import_snapshot(
-            snapshot_from_json(src.read_text(encoding="utf-8"))[0])
+            snapshot_from_json(src.read_text(encoding="utf-8")).snapshot)
         writes = {f"groups/{n}.yaml": yaml_config.dump_group(g)
                   for n, g in imported.groups.items()}
         writes.update({f"rules/{n}.yaml": yaml_config.dump_rules_file(rf)
@@ -351,8 +352,8 @@ def main(argv=None, gateway=None) -> int:
                 print("error: drift needs a snapshot — run 'hcs-sg "
                       "snapshot' or pass --snapshot FILE", file=sys.stderr)
                 return 1
-            old, _ = snapshot_from_json(
-                snap_file.read_text(encoding="utf-8"))
+            old = snapshot_from_json(
+                snap_file.read_text(encoding="utf-8")).snapshot
             result = drift_uc.diff_inventory(
                 old, read_snapshot(gateway, gateway))
             n = sum(len(result[k]) for k in
@@ -383,7 +384,8 @@ def main(argv=None, gateway=None) -> int:
                 print("\n".join(report.errors), file=sys.stderr)
                 return 1
             if hasattr(gateway, "inventory"):    # whole cloud, 2 calls
-                snap, nics_by_ip = gateway.inventory()
+                inv = gateway.inventory()
+                snap, nics_by_ip = inv.snapshot, inv.nics_by_ip
             else:                                 # protocol-level fallback
                 all_ips = sorted({m.ip for g in state.groups.values()
                                   for m in g.members})

@@ -9,10 +9,16 @@ import yaml
 
 from hcs_sg_iac.model.entities import (DesiredState, Group, RulesFile,
                                        parse_group, parse_rules_file)
+from hcs_sg_iac.model.portset import PortSet
 from hcs_sg_iac.model.remote import RemoteGroup
 from hcs_sg_iac.model.report import Report
 
 _FAILED = object()   # sentinel: read/parse failed (error already reported)
+
+# SafeDumper represents known builtins only; teach it that a PortSet IS
+# its canonical string (dump_group/dump_rules_file may carry one).
+yaml.SafeDumper.add_representer(
+    PortSet, lambda d, x: d.represent_str(x + ""))
 
 
 def _load_yaml(path: Path, where: str, report: Report) -> object:

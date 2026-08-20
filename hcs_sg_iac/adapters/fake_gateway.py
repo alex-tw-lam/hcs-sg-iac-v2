@@ -4,8 +4,9 @@ CLI e2e and the contract suite. call_log records every write."""
 import logging
 
 from hcs_sg_iac.model.cloud import (CloudNic, CloudRule, CloudSg,
-                                     Snapshot)
+                                     Inventory, Snapshot)
 from hcs_sg_iac.model.errors import CloudError, QuotaExhausted
+from hcs_sg_iac.model.quota import Quota
 
 _log = logging.getLogger(__name__)   # --verbose: wired by the CLI
 
@@ -75,7 +76,7 @@ class FakeGateway:
         self._trace("list_attached_nics")
         return nics
 
-    def inventory(self) -> "tuple[Snapshot, dict]":
+    def inventory(self) -> Inventory:
         """In-memory fast path — parity with HuaweiGateway.inventory so
         the contract suite cross-checks the same seam on both."""
         rules = {sg.id: [r for r in self._rules.values()
@@ -88,8 +89,9 @@ class FakeGateway:
         for n in self._nics:
             nics.setdefault(n.ip, []).append(n)
         self._trace("inventory")
-        return (Snapshot(sgs=tuple(self._sgs.values()), rules=rules,
-                         attached=attached), nics)
+        return Inventory(snapshot=Snapshot(sgs=tuple(self._sgs.values()),
+                                           rules=rules, attached=attached),
+                         nics_by_ip=nics)
 
     # -- SgWriter --
     def create_security_group(self, name: str, description: str) -> CloudSg:
@@ -155,10 +157,7 @@ class FakeGateway:
         self._trace(f"detach:{port_id}->{sg_id}")
 
     # quota display helper used by the CLI (duck-typed, not a protocol)
-    def quota_snapshot(self) -> dict:
-        used = len(self.call_log)
+    def quota_snapshot(self) -> Quota:
         limit = 25 if self.budget is None else self.budget
-        return {"service_budget_calls": limit,
-                "used_calls": used,
-                "effective_limit": limit,
-                "window_resets_at": None}
+        return Quota(service_budget_calls=limit, used_calls=len(self.call_log),
+                     effective_limit=limit, window_resets_at=None)

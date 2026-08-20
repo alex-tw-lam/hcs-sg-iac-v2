@@ -19,9 +19,9 @@ def test_external_throttle_halves_effective_limit_snapshot():
     lim.try_acquire()                        # used = 1
     lim.report_external_throttle()
     # effective limit is now max(used, 10 // 2) = 5
-    assert lim.snapshot()["effective_limit"] == 5
+    assert lim.snapshot().effective_limit == 5
     clock.now += 301                         # rollover clears the override
-    assert lim.snapshot()["effective_limit"] == 10
+    assert lim.snapshot().effective_limit == 10
 
 
 def test_external_throttle_late_in_window_pins_limit_to_used():
@@ -31,9 +31,9 @@ def test_external_throttle_late_in_window_pins_limit_to_used():
         lim.try_acquire()                    # used = 7
     lim.report_external_throttle()
     # effective limit is now max(used=7, 10 // 2) = 7 → no more calls this window
-    assert lim.snapshot()["effective_limit"] == 7
+    assert lim.snapshot().effective_limit == 7
     clock.now += 301                         # rollover clears the override
-    assert lim.snapshot()["effective_limit"] == 10
+    assert lim.snapshot().effective_limit == 10
 
 
 def test_snapshot_fields():
@@ -41,7 +41,7 @@ def test_snapshot_fields():
     lim = FixedWindowLimiter(budget=25, window_seconds=300, clock=clock)
     lim.try_acquire()
     snap = lim.snapshot()
-    assert snap == {
+    assert snap.asdict() == {
         "service_budget_calls": 25,
         "used_calls": 1,
         "effective_limit": 25,

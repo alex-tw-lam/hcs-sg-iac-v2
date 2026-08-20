@@ -23,6 +23,6 @@ def test_snapshot_json_roundtrip():
     nics = {"10.0.1.1": [CloudNic(port_id="p1", ip="10.0.1.1",
                                   vm_name="vm-a")]}
     text = snapshot_to_json(snap.sgs, snap.rules, snap.attached, nics)
-    snap2, nics2 = snapshot_from_json(text)
-    assert snap2 == snap
-    assert nics2 == nics
+    inv = snapshot_from_json(text)
+    assert inv.snapshot == snap
+    assert inv.nics_by_ip == nics

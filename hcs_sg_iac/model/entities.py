@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from hcs_sg_iac.model.portset import PortError, parse_ports
+from hcs_sg_iac.model.portset import PortError, PortSet, parse_ports
 from hcs_sg_iac.model.remote import Remote, parse_remote
 from hcs_sg_iac.model.report import Report
 
@@ -31,8 +31,14 @@ class Group:
 class Rule:
     direction: str            # "ingress" | "egress"
     protocol: str
-    ports: Optional[str]      # canonical form; None = all ports
+    ports: "PortSet | None"   # canonical form; None = all ports
     remote: Remote
+
+    def __post_init__(self):
+        # hand-constructed rules (tests, importer) carry plain strings;
+        # the grammar ops (.entries/.bounds) live on PortSet
+        if isinstance(self.ports, str):
+            object.__setattr__(self, "ports", PortSet(self.ports))
 
     def identity(self) -> tuple:
         return (self.direction, self.protocol, self.ports, self.remote)

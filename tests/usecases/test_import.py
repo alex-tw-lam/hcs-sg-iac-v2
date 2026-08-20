@@ -44,7 +44,7 @@ def _write(root, imp):
 
 def test_import_then_plan_converges(tmp_path):
     gw = _seeded()
-    imp = importer.import_snapshot(gw.inventory()[0])
+    imp = importer.import_snapshot(gw.inventory().snapshot)
     assert sorted(imp.groups) == ["db", "web"]
     assert any("self-referential" in n for n in imp.notes)
     _write(tmp_path, imp)
@@ -59,7 +59,7 @@ def test_unrepresentable_rule_is_delete_planned_not_hidden(tmp_path):
     gw.add_rule(CloudRule(id="r-v6", sg_id="sg-db", direction="egress",
                           protocol=None, ports=None, remote_group_id=None,
                           remote_ip_prefix="::/0"))
-    imp = importer.import_snapshot(gw.inventory()[0])
+    imp = importer.import_snapshot(gw.inventory().snapshot)
     assert any("not a v4 CIDR" in n and "delete" in n for n in imp.notes)
     _write(tmp_path, imp)
     al, errors = pipeline.plan_project(yaml_config.load_project, gw, tmp_path)

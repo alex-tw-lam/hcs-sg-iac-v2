@@ -38,10 +38,10 @@ from huaweicloudsdkvpc.v2 import (CreateSecurityGroupOption,
                                   UpdatePortRequest, VpcClient)
 
 from hcs_sg_iac.adapters.ratelimit import FixedWindowLimiter
-from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg, Snapshot
+from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg, Inventory, Snapshot
 from hcs_sg_iac.model.entities import Rule
 from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
-from hcs_sg_iac.model.portset import parse_ports
+from hcs_sg_iac.model.portset import parse_ports  # PortSet via _bounds
 
 _log = logging.getLogger(__name__)   # --verbose: wired by the CLI
 
@@ -110,7 +110,7 @@ class HuaweiGateway:
         # visible in the one-line error (and the audit record)
         self._warned_low_budget = False   # one warning per run, not per call
 
-    def quota_snapshot(self) -> dict:
+    def quota_snapshot(self):
         return self._limiter.snapshot()
 
     def _run(self, request):
@@ -118,7 +118,7 @@ class HuaweiGateway:
             raise QuotaExhausted(
                 "service call budget exhausted for this window; last "
                 f"calls: {', '.join(self._recent_calls[-20:])}",
-                retry_at=self._limiter.snapshot()["window_resets_at"])
+                retry_at=self._limiter.snapshot().window_resets_at)
         method_name = _METHODS[type(request).__name__]
         self._recent_calls.append(method_name)
         del self._recent_calls[:-50]              # cap the trail
@@ -128,10 +128,10 @@ class HuaweiGateway:
             resp = method(request)
             snap = self._limiter.snapshot()
             _log.info("gateway call %s (%s/%s this window, %.0f ms)",
-                      method_name, snap["used_calls"],
-                      snap["effective_limit"],
+                      method_name, snap.used_calls,
+                      snap.effective_limit,
                       (time.perf_counter() - started) * 1000)
-            left = snap["effective_limit"] - snap["used_calls"]
+            left = snap.left
             if left <= 5 and not self._warned_low_budget:
                 self._warned_low_budget = True
                 _log.warning(
@@ -145,12 +145,12 @@ class HuaweiGateway:
                 self._limiter.report_external_throttle()
                 _log.warning("cloud throttle %s — our limit now %s",
                              e.error_code,
-                             self._limiter.snapshot()["effective_limit"])
+                             self._limiter.snapshot().effective_limit)
                 raise CloudThrottled(
                     f"cloud throttled: {e.error_code} {e.error_msg}; "
                     f"calls before throttle: "
                     f"{', '.join(self._recent_calls[-20:])}",
-                    retry_at=self._limiter.snapshot()["window_resets_at"]) from e
+                    retry_at=self._limiter.snapshot().window_resets_at) from e
             raise CloudError(f"{e.status_code}: {e.error_code} {e.error_msg}") from e
         except SdkException as e:
             raise CloudError(str(e)) from e
@@ -187,7 +187,7 @@ class HuaweiGateway:
                 security_group_id=sg_id, limit=_RULE_PAGE, marker=marker),
             "security_group_rules", _RULE_PAGE, self._to_cloud_rule)
 
-    def inventory(self) -> "tuple[Snapshot, dict]":
+    def inventory(self) -> Inventory:
         """The WHOLE account in two paged call families (the big rate
         saver): neutron_list_security_groups embeds each SG's rules, and
         one unfiltered list_ports yields membership (port.security_
@@ -221,11 +221,10 @@ class HuaweiGateway:
         self._paged(
             lambda marker: ListPortsRequest(limit=_PORT_PAGE, marker=marker),
             "ports", _PORT_PAGE, to_port)
-        for sg in sgs:          # read_snapshot invariant: every sg keyed
-            rules.setdefault(sg.id, [])
-            attached.setdefault(sg.id, [])
-        return Snapshot(sgs=tuple(sgs), rules=rules, attached=attached), \
-            nics_by_ip
+        # every sg id keyed in rules/attached: Snapshot's own invariant now
+        return Inventory(snapshot=Snapshot(sgs=tuple(sgs), rules=rules,
+                                           attached=attached),
+                         nics_by_ip=nics_by_ip)
 
     # -- MembershipReader --
     def find_nics_by_ip(self, ips: list) -> dict:
@@ -379,5 +378,4 @@ def _bounds(ports: "str | None"):
     is the identity envelope."""
     if ports is None:
         return None, None
-    lo_s, hi_s = ports.split("-", 1) if "-" in ports else (ports, ports)
-    return int(lo_s), int(hi_s)
+    return ports.bounds(ports.entries[0])

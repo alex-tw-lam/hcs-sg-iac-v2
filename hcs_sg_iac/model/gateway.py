@@ -4,13 +4,13 @@ apply additionally needs writers. Any gateway (real SDK, in-memory fake)
 is substitutable (LSP) — the contract test enforces it."""
 from typing import Protocol
 
-from hcs_sg_iac.model.cloud import CloudRule, CloudSg
+from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg
 from hcs_sg_iac.model.entities import Rule
 
 
 class SgReader(Protocol):
-    def list_security_groups(self) -> list: ...
-    def list_rules(self, sg_id: str) -> list: ...
+    def list_security_groups(self) -> "list[CloudSg]": ...
+    def list_rules(self, sg_id: str) -> "list[CloudRule]": ...
 
 
 class SgWriter(Protocol):
@@ -25,8 +25,8 @@ class SgRuleWriter(Protocol):
 
 
 class MembershipReader(Protocol):
-    def find_nics_by_ip(self, ips: list) -> dict: ...      # ip -> [CloudNic]
-    def list_attached_nics(self, sg_id: str) -> list: ...
+    def find_nics_by_ip(self, ips: list) -> "dict[str, list[CloudNic]]": ...
+    def list_attached_nics(self, sg_id: str) -> "list[CloudNic]": ...
 
 
 class NicBinder(Protocol):

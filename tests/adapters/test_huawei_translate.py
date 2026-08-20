@@ -11,6 +11,7 @@ from huaweicloudsdkcore.exceptions.exceptions import (ClientRequestException,
 from hcs_sg_iac.adapters.huawei_gateway import (HuaweiGateway, _METHODS,
                                                 _bounds, build_gateway)
 from hcs_sg_iac.adapters.ratelimit import FixedWindowLimiter
+from hcs_sg_iac.model.portset import PortSet
 from hcs_sg_iac.model.cloud import CloudRule
 from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
 
@@ -65,8 +66,8 @@ def test_cloud_rule_translation_all_ports():
 
 def test_bounds_envelope():
     assert _bounds(None) == (None, None)
-    assert _bounds("80") == (80, 80)
-    assert _bounds("8000-9000") == (8000, 9000)
+    assert _bounds(PortSet("80")) == (80, 80)
+    assert _bounds(PortSet("8000-9000")) == (8000, 9000)
 
 
 def test_cloud_rule_translation_icmp_type_code_not_ports():
@@ -126,7 +127,7 @@ def test_huawei_chokepoint_429_becomes_throttled_and_halves_limit():
     assert "APIGW.0301" in str(ei.value)
     assert "calls before throttle: list_security_groups" in str(ei.value)
     assert ei.value.retry_at == 1300.0   # frozen clock 1000 + 300s window
-    assert gw.quota_snapshot()["effective_limit"] == 2   # 4 // 2: halved
+    assert gw.quota_snapshot().effective_limit == 2   # 4 // 2: halved
 
 
 def test_huawei_chokepoint_budget_exhaustion_short_circuits_sdk():
@@ -155,7 +156,7 @@ def test_huawei_chokepoint_other_service_error_becomes_cloud_error():
         gw.list_security_groups()
     assert "404" in str(ei.value)
     assert "VPC.0404" in str(ei.value) and "not found" in str(ei.value)
-    assert gw.quota_snapshot()["effective_limit"] == 4   # no shrink on plain errors
+    assert gw.quota_snapshot().effective_limit == 4   # no shrink on plain errors
 
 
 def test_huawei_chokepoint_client_request_429_also_throttles_with_deadline():
@@ -175,7 +176,7 @@ def test_huawei_chokepoint_client_request_429_also_throttles_with_deadline():
         gw.list_security_groups()
     assert "429" in str(ei.value)
     assert ei.value.retry_at == 1300.0
-    assert gw.quota_snapshot()["effective_limit"] == 2
+    assert gw.quota_snapshot().effective_limit == 2
 
 
 def test_inventory_whole_cloud_in_two_calls():
@@ -208,7 +209,8 @@ def test_inventory_whole_cloud_in_two_calls():
                         list_ports=handler),
         FixedWindowLimiter(budget=10, window_seconds=300,
                            clock=lambda: 1000.0))
-    snap, nics = gw.inventory()
+    inv = gw.inventory()
+    snap, nics = inv.snapshot, inv.nics_by_ip
     assert [s.name for s in snap.sgs] == ["web"]
     assert snap.rules["sg-1"][0] == CloudRule(
         id="r-1", sg_id="sg-1", direction="ingress", protocol="tcp",

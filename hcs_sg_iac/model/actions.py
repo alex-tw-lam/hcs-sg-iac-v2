@@ -2,7 +2,7 @@
 """Plan output + executable payloads. One ActionList feeds the renderer
 (dry-run display) and apply (execution) — a single source of truth."""
 from dataclasses import dataclass
-from typing import Optional
+from typing import Literal, Optional
 
 from hcs_sg_iac.model.entities import Rule
 
@@ -53,8 +53,8 @@ Payload = CreateSg | UpdateSg | DeleteSg | AttachNic | DetachNic | CreateRule | 
 # ---- display + dispatch ----
 @dataclass(frozen=True)
 class Action:
-    sign: str                    # "+" | "-" | "~"
-    type: str                    # "member" | "rule" | "group"
+    sign: 'Literal["+", "-", "~"]'
+    type: 'Literal["member", "rule", "group"]' 
     group: str
     detail: str
     cloud_id: Optional[str] = None
@@ -79,5 +79,5 @@ class ActionList:
 @dataclass(frozen=True)
 class ActionResult:
     action: Action
-    status: str                  # "ok" | "failed" | "throttled"
+    status: 'Literal["ok", "failed", "throttled"]'
     error: Optional[str] = None

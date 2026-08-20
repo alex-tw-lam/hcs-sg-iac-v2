@@ -54,7 +54,7 @@ gateway); `Snapshot` = one whole observed cloud at a point in time.
 
 | Ring | Modules | Responsibility |
 |---|---|---|
-| model | `entities` `portset` `remote` `actions` `cloud` `gateway` `report` `errors` | The vocabulary. "The model IS the schema": from-dict constructors validate everything and report ALL violations. Pure stdlib. |
+| model | `entities` `portset` `remote` `actions` `cloud` `gateway` `quota` `report` `errors` | The vocabulary. "The model IS the schema": from-dict constructors validate everything and report ALL violations. Pure stdlib. |
 | usecases | `validate` `resolve` `plan` `apply` `pipeline` | The verbs. Pure logic over model types + Protocols; no I/O of their own. |
 | adapters | `yaml_config` `huawei_gateway` `fake_gateway` `ratelimit` `audit` | The only ring that touches third-party libraries. Each adapter owns exactly one external thing. |
 | cli | `main` `render` | Thin presentation: parse argv → call `pipeline` → render. |

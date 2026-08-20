@@ -45,12 +45,12 @@ def render_plan(al, quota=None, executed=None, dry_run: bool = True) -> str:
     if al.clears:
         lines.append(f"WARNING: this removes ALL {', '.join(al.clears)}.")
     if quota:
-        if quota["left"] is None:           # gateway without quota_snapshot
-            lines.append(f"Quota: {quota['needed']} calls needed, "
+        if quota.left is None:              # gateway without quota_snapshot
+            lines.append(f"Quota: {quota.needed} calls needed, "
                          f"remaining unknown.")
         else:
-            lines.append(f"Quota: {quota['needed']} calls needed, "
-                         f"{quota['left']} left in this window.")
+            lines.append(f"Quota: {quota.needed} calls needed, "
+                         f"{quota.left} left in this window.")
     for u in al.unmanaged:
         lines.append(f"NOT MANAGED: {u}")
     for o in al.overlap:
@@ -74,7 +74,7 @@ def render_json(al, quota=None, executed=None) -> str:
                      "detail": a.detail, "cloud_id": _display_id(a)}
                     for a in al.actions],
         "summary": al.summary(),
-        "quota": quota,
+        "quota": quota.asdict() if quota else None,
         "unmanaged": list(al.unmanaged),
         "overlap": list(al.overlap),
     }
