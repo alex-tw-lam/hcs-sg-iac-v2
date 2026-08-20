@@ -1,14 +1,16 @@
 # tests/test_frames_cli.py
 """Tier-3 consumer: interprets tier-3 Frame rows (tests/specs/frames.py)
 as argv -> rc/stdout/stderr against main() with a seeded FakeGateway
-(the env-config family exercises load_config directly)."""
+(the env-config family exercises load_config directly). No command
+prompts anymore (--yes is the consent) — a stray input() call fails
+the row loudly instead of hanging."""
 import json
 
 import pytest
 
 from hcs_sg_iac.cli.main import load_config, main
 from tests.specs.builders import check_cloud, make_project, seed_gateway
-from tests.specs.frames import RAISE_EOF, RAISE_KI, TIER3
+from tests.specs.frames import TIER3
 
 
 @pytest.mark.parametrize("frame", TIER3, ids=lambda f: f.id)
@@ -27,19 +29,8 @@ def test_frame(frame, tmp_path, capsys, monkeypatch):
     root = make_project(tmp_path, frame.files)
     gw = seed_gateway(frame.cloud) if frame.inject_gateway else None
 
-    def fake_input(prompt=""):
-        print(prompt, end="")             # real input() echoes the prompt
-        if frame.stdin == RAISE_EOF:
-            raise EOFError
-        if frame.stdin == RAISE_KI:
-            raise KeyboardInterrupt
-        return frame.stdin
-
-    if frame.stdin is not None:
-        monkeypatch.setattr("builtins.input", fake_input)
-    else:   # a prompt here would hang real runs -- fail loudly instead
-        monkeypatch.setattr("builtins.input",
-                            lambda *_: pytest.fail(f"{frame.id}: unexpected prompt"))
+    monkeypatch.setattr("builtins.input",
+                        lambda *_: pytest.fail(f"{frame.id}: unexpected prompt"))
 
     for key, value in (frame.env or {}).items():
         if value is None:
@@ -52,7 +43,10 @@ def test_frame(frame, tmp_path, capsys, monkeypatch):
     args = list(frame.argv or [])
     if not frame.raw_argv and "--project" not in args:
         args[1:1] = ["--project", str(root)]
-    rc = main(args, gateway=gw)
+    try:
+        rc = main(args, gateway=gw)
+    except SystemExit as e:         # argparse parse errors: exit code IS rc
+        rc = e.code
     assert rc == frame.expect_rc, frame.id
 
     captured = capsys.readouterr()
@@ -63,8 +57,6 @@ def test_frame(frame, tmp_path, capsys, monkeypatch):
     for sub in frame.expect_err:
         assert sub in captured.err, (frame.id, sub)
     if frame.expect_json is not None:
-        # a confirmation prompt may precede the JSON on stdout (real
-        # input() echoes it) -- parse from the first opening brace
         data = json.loads(captured.out[captured.out.index("{"):])
         for key, want in frame.expect_json.items():
             assert data[key] == want, (frame.id, key)

@@ -2,7 +2,7 @@
 
 Security-group-as-code for Huawei Cloud Stack 8.5.1. Groups first
 (members = VM NIC IPs), then rules between groups (or CIDRs).
-Dry run by default — `--execute` is the only path to real writes.
+Dry run by default — `--yes` is the only path to real writes.
 
 ## Install
 
@@ -14,11 +14,19 @@ Dry run by default — `--execute` is the only path to real writes.
 
 ## Usage
 
+One rule covers every command: **nothing writes without `--yes`.** Bare
+`apply`/`destroy` is a dry run (same output as `plan`); `--yes` confirms
+it — the preview table prints first, then the writes. `plan` (and
+`validate`/`schema`) reject `--yes` at parse time: read-only by
+construction.
+
     hcs-sg validate                  # files only, no credentials
     hcs-sg plan                      # diff code vs cloud (read-only)
-    hcs-sg apply                     # dry run; add --execute to write
-    hcs-sg apply --execute           # prompts typed 'yes' unless --yes
-    hcs-sg destroy web-tier --execute   # prompts the group name
+    hcs-sg apply                     # same dry run as plan
+    hcs-sg apply --yes               # preview, then write (audited)
+    hcs-sg destroy web-tier --yes    # preview, then delete
+    hcs-sg plan --verbose            # progress log to stderr (works on
+                                     # apply/destroy too; stdout stays pure)
 
 ## Project files
 
@@ -59,15 +67,17 @@ validate`/`plan`, not expressible in a per-file schema.
 - Cloud rules are immutable: edits are delete + create, shown honestly.
 - Rule edits create before delete (no transient coverage gap).
 - Rate-limit first: shared cloud quota is 90 calls / 5 min; this tool's
-  slice defaults to 25 per window (SERVICE_CALL_BUDGET). Exhausted or
+  slice defaults to 25 per window (SERVICE_CALL_BUDGET — planning reads
+  spend it too, so size it to your estate). Exhausted or
   cloud-throttled (429): the run waits out the window (notice on stderr)
-  and retries — it continues across windows instead of stopping; Ctrl+C
-  aborts. If the gateway can't report a retry deadline, remaining
-  actions are marked throttled and re-running `apply` resumes
-  (idempotent).
+  and retries — planning reads included — continuing across windows
+  instead of stopping; Ctrl+C aborts. If the gateway can't report a
+  retry deadline, remaining actions are marked throttled and re-running
+  `apply` resumes (idempotent). Unretryable cloud failures print one
+  clean `error: …` line (never a traceback).
 - `SSL_VERIFY=false` also mutes the noisy Unverified-HTTPS warnings
   (you already opted out; the tool won't nag about it on every call).
-- Every `--execute` run appends a record to `audit.jsonl` in the
+- Every `--yes` run appends a record to `audit.jsonl` in the
   project directory (timestamp, actions, created cloud ids, quota).
 - Whole-group deletion only via explicit `destroy` (typed-name
   confirmation). Removing a file just unmanages the group.

@@ -24,7 +24,7 @@ model          model/        entities · portset · remote · actions ·
 | cli | `main` `render` | Thin presentation: parse argv → call `pipeline` → render. |
 
 `usecases/pipeline.py` is the orchestration seam: it sequences
-load → validate → resolve → snapshot → plan (and for `--execute`:
+load → validate → resolve → snapshot → plan (and for `--yes`:
 confirm-hook → execute → audit). The CLI is one consumer; a future web API
 or GUI is another — presentation layers provide their own confirmation
 hooks and renderers, the pipeline is shared.

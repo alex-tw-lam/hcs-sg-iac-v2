@@ -52,7 +52,7 @@ loader/usecase/adapter · **T3** cli-e2e · **T4** cloud-contract
 | credentials | all set · ≥1 missing (of AK/SK/PROJECT_ID/ENDPOINT) |
 | subcommand | validate · plan · apply · destroy · none (usage) |
 | `--project` | explicit · default `"."` · nonexistent |
-| `--json` / `--execute` / `--yes` | absent/present (incl. `--yes` without `--execute`) |
+| `--json` / `--yes` / `--verbose` | absent/present |
 | stdin (apply) | `yes` · `no` · `YES` · EOF · KeyboardInterrupt |
 | stdin (destroy) | exact name · wrong name · EOF |
 | destroy target | cloud SG exists · unknown |
@@ -95,10 +95,10 @@ above; the executable truth is `tests/specs/frames.py`.)
 7. Stem equality is only checked for successfully parsed documents.
 8. A rules file requires its group file (dangling ⇒ error).
 9. Budget exhaustion throttles all subsequent actions (rank order).
-10. `--execute` rc 0 iff all results ok (throttled ⇒ rc 1).
+10. `--yes` rc 0 iff all results ok (throttled ⇒ rc 1).
 11. destroy confirms by typed group NAME; apply confirms exact `yes`
     (case-sensitive).
-12. `--yes` never implies `--execute`.
+12. preview table prints before any write under `--yes`.
 13. Multi-entry code rules expand to single-range cloud identities.
 14. `1-65535` → None (all ports); `all` ↔ cloud protocol None; unset
     remote ↔ `0.0.0.0/0`.
@@ -107,7 +107,7 @@ above; the executable truth is `tests/specs/frames.py`.)
 17. Cloud SG without code is never deleted by plan/apply (destroy only).
 18. `.yml` files never parsed (warning only, both dirs).
 19. >20 merged port entries ⇒ error; 20 adjacent ⇒ `"1-20"`.
-20. `audit.jsonl` only on `--execute`; quota context is pre-execute.
+20. `audit.jsonl` only on `--yes`; quota context is pre-execute.
 21. Clear-all WARNING only for managed-empty directions with actual
     `-` rule rows in the plan.
 22. FakeGateway budget is its own attribute (substitute for env budget).
@@ -159,7 +159,7 @@ throttle-resume convergence, audit record shape, op-None skip); rendering
 ### T3 cli-e2e
 
 Highlights (families and literals per `tests/specs/frames.py`): validate ok/invalid + no gateway touched; no-write modes
-(plan, default apply, `--yes` without `--execute`) with zero call_log;
+(plan, default apply) with zero call_log;
 execute confirmations (yes/no/YES/EOF/KeyboardInterrupt/--yes-skip);
 clear-all warning precision; credentials gate (names all four vars);
 --json modes; destroy confirmations and unknown name; throttled ⇒ rc 1;

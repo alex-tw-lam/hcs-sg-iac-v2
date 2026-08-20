@@ -1,6 +1,8 @@
 # tests/usecases/test_diff.py
 """Plan-engine depth tests that no PLAN-*/DSTR-* frame row pins; the
 breadth lives in the frame catalogue (tests/specs/frames.py)."""
+import pytest
+
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.model.cloud import CloudRule, CloudSg
 from hcs_sg_iac.model.entities import (DesiredState, Group, Rule,
@@ -31,6 +33,24 @@ def test_detach_detail_falls_back_to_port_id_when_ip_empty():
     al = plan_state(gw, state)
     assert [(a.sign, a.type, a.detail, a.cloud_id) for a in al.actions] == \
         [("-", "member", "ip p9", "p9")]
+
+
+def test_duplicate_cloud_names_report_every_instance():
+    """CLI-20/PLAN depth pin the single-pair error; unique here: a name
+    held by THREE SGs plus a second duplicated name — every name and
+    EVERY sg id is enumerated, not just the first pair found."""
+    gw = FakeGateway()
+    for sg_id, name in (("sg-w1", "web"), ("sg-w2", "web"), ("sg-w3", "web"),
+                        ("sg-d1", "db"), ("sg-d2", "db"), ("sg-ok", "fine")):
+        gw.add_sg(CloudSg(id=sg_id, name=name, description="d"))
+    state = DesiredState(groups={"fine": Group("fine", "d", ())}, rules={})
+    with pytest.raises(ValueError) as ei:
+        plan_state(gw, state)
+    msg = str(ei.value)
+    for token in ("'web'", "sg-w1", "sg-w2", "sg-w3",
+                  "'db'", "sg-d1", "sg-d2"):
+        assert token in msg, token
+    assert "fine" not in msg                 # the un-duplicated name stays out
 
 
 # ---- clear-all set (ActionList.clears): data, not display parsing ----

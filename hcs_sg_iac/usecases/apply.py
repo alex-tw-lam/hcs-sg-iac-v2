@@ -9,6 +9,7 @@ carries a retry deadline (QuotaExhausted.retry_at / CloudThrottled
 window to roll over and RETRIES the same action, so a run continues
 across windows instead of stopping."""
 import datetime
+import logging
 import time
 
 from hcs_sg_iac.model.actions import (ActionList, ActionResult,
@@ -16,12 +17,39 @@ from hcs_sg_iac.model.actions import (ActionList, ActionResult,
                                       DeleteRule, DeleteSg, DetachNic, UpdateSg)
 from hcs_sg_iac.model.errors import CloudThrottled, QuotaExhausted
 
+_log = logging.getLogger(__name__)   # --verbose: wired by the CLI
+
 # Execution order: create the SG first (so later ops can reference it),
 # then metadata, then allow-rules and members, then removals, SG delete last.
 _ORDER = {CreateSg: 0, UpdateSg: 1, CreateRule: 2, AttachNic: 3,
           DeleteRule: 4, DetachNic: 5, DeleteSg: 6}
 
 _MAX_WAITS = 5          # per action: refuse to spin on a stuck window
+
+
+def wait_for_window(e, *, sleep, notify, what: str) -> bool:
+    """Shared wait-and-continue hook (executor actions AND the planning
+    read loop in pipeline.py): sleep until the exception's retry_at
+    (window rollover), notifying first. Returns True when the caller
+    should retry; False when no sleep hook / no deadline (the classic
+    throttle-and-skip or clean-error path stands)."""
+    deadline = getattr(e, "retry_at", None)
+    if sleep is None or deadline is None:
+        return False
+    wait_for = max(0.0, deadline - time.time())
+    if notify:
+        notify(f"rate window exhausted — waiting {int(wait_for)}s, then "
+               f"continuing ({what})")
+    sleep(wait_for)
+    return True
+
+
+def _record(results: list, action, status: str, error=None) -> None:
+    """Append one result and log it (--verbose): the run is visible
+    action-by-action instead of only via the end-of-run table."""
+    results.append(ActionResult(action, status, error))
+    _log.info("action %s: %s %s %s", status, action.sign, action.type,
+              action.group)
 
 
 def execute(action_list: ActionList, *, sg_writer, rule_writer, binder,
@@ -45,17 +73,18 @@ def execute(action_list: ActionList, *, sg_writer, rule_writer, binder,
     for action in ordered:
         op = action.op
         if throttled:
-            results.append(ActionResult(action, "throttled",
-                                        "skipped: budget exhausted earlier"))
+            _record(results, action, "throttled",
+                    "skipped: budget exhausted earlier")
             continue
         if (isinstance(op, (CreateRule, AttachNic))
                 and action.group in failed_creates
                 and resolve_sg_id(action.group, op.sg_id) == ""):
-            results.append(ActionResult(
-                action, "failed",
-                "group creation failed — skipping dependent"))
+            _record(results, action, "failed",
+                    "group creation failed — skipping dependent")
             continue
         waits = 0
+        _log.info("executing %s %s %s — %s", action.sign, action.type,
+                  action.group, action.detail)
         while True:
             try:
                 if isinstance(op, CreateSg):
@@ -80,27 +109,21 @@ def execute(action_list: ActionList, *, sg_writer, rule_writer, binder,
                                       op.port_id)
                 else:                               # unreachable by construction
                     raise RuntimeError(f"unknown payload {type(op).__name__}")
-                results.append(ActionResult(action, "ok"))
+                _record(results, action, "ok")
                 break
             except (QuotaExhausted, CloudThrottled) as e:
-                deadline = getattr(e, "retry_at", None)
-                if sleep is not None and deadline is not None \
-                        and waits < _MAX_WAITS:
+                if waits < _MAX_WAITS and wait_for_window(
+                        e, sleep=sleep, notify=notify,
+                        what=f"action {action.type} {action.group}"):
                     waits += 1
-                    wait_for = max(0.0, deadline - time.time())
-                    if notify:
-                        notify(f"rate window exhausted — waiting "
-                               f"{int(wait_for)}s, then continuing "
-                               f"(action {action.type} {action.group})")
-                    sleep(wait_for)
                     continue                       # window rolled over: retry
                 throttled = True
-                results.append(ActionResult(action, "throttled", str(e)))
+                _record(results, action, "throttled", str(e))
                 break
             except Exception as e:                  # noqa: BLE001 — isolate
                 if isinstance(op, CreateSg):
                     failed_creates.add(action.group)    # skip its dependents
-                results.append(ActionResult(action, "failed", str(e)))
+                _record(results, action, "failed", str(e))
                 break
 
     if audit is not None:

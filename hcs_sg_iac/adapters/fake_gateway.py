@@ -1,8 +1,12 @@
 # hcs_sg_iac/adapters/fake_gateway.py
 """In-memory gateway. Implements every protocol; powers fast tests,
 CLI e2e and the contract suite. call_log records every write."""
+import logging
+
 from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg
 from hcs_sg_iac.model.errors import CloudError, QuotaExhausted
+
+_log = logging.getLogger(__name__)   # --verbose: wired by the CLI
 
 
 class FakeGateway:
@@ -34,21 +38,26 @@ class FakeGateway:
 
     def _spend(self, what: str):
         self.call_log.append(what)
+        _log.info("gateway call %s", what)
         if self.budget is not None and len(self.call_log) > self.budget:
             raise QuotaExhausted(f"fake budget exhausted ({self.budget} calls)")
 
     # -- SgReader --
     def list_security_groups(self) -> list:
+        _log.info("gateway call list_security_groups")
         return list(self._sgs.values())
 
     def list_rules(self, sg_id: str) -> list:
+        _log.info("gateway call list_rules")
         return [r for r in self._rules.values() if r.sg_id == sg_id]
 
     # -- MembershipReader --
     def find_nics_by_ip(self, ips: list) -> dict:
+        _log.info("gateway call find_nics_by_ip")
         return {ip: [n for n in self._nics if n.ip == ip] for ip in ips}
 
     def list_attached_nics(self, sg_id: str) -> list:
+        _log.info("gateway call list_attached_nics")
         return [n for n in self._nics if (sg_id, n.port_id) in self._attached]
 
     # -- SgWriter --

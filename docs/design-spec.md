@@ -107,7 +107,7 @@ Field rules:
 - `ingress: []` / `egress: []`: explicitly remove **all** rules in that
   direction on apply (typed confirmation required).
 - Whole security group deletion is never implicit. `hcs-sg destroy <name>`
-  is the only path, and it requires `--execute` (plus typed-name
+  is the only path, and it requires `--yes` (plus the explicit name
   confirmation).
 - Membership is strict-sync: NICs attached to the group's cloud SG whose IPs
   are not in `members:` get detached on apply. The IP list is the truth.
@@ -144,7 +144,7 @@ remote). Cloud `remote_group_id` is translated to a group name when the SG is
 known in the account; `remote_ip_prefix` to a CIDR.
 
 Apply is sequential, resumable and idempotent, and only ever runs under
-`--execute` (without it, `apply`/`destroy` are dry runs): every cloud write goes through
+`--yes` (without it, `apply`/`destroy` are dry runs): every cloud write goes through
 the fixed-window rate limiter (same shared 90 calls / 5 min cloud quota as the
 sibling service; this tool takes a configurable budget slice, default 25).
 On budget exhaustion or a cloud 429 the executor WAITS for the window to
@@ -153,7 +153,9 @@ noted on stderr) and retries the same action, so a run continues across
 windows instead of stopping (Ctrl+C aborts). When the gateway reports no
 retry deadline, the fallback marks remaining actions `throttled` and
 re-running `apply` resumes (same semantics as the sibling's
-207-partial-resume design).
+207-partial-resume design). The planning reads (resolution + snapshot)
+share the same wait-and-continue; unretryable cloud failures surface as
+single `error: …` lines, never tracebacks.
 Every apply appends an append-only JSONL audit record (timestamp, project,
 actions, cloud IDs, quota snapshot).
 
@@ -166,21 +168,25 @@ swappable by design). Synchronous SDK client (a CLI has no concurrency need).
 ```
 hcs-sg validate [--project DIR] [--json]
 hcs-sg plan     [--project DIR] [--json]
-hcs-sg apply    [--project DIR] [--json] [--execute] [--yes]
-hcs-sg destroy  <name> [--project DIR] [--json] [--execute] [--yes]
+hcs-sg apply    [--project DIR] [--json] [--yes] [--verbose]
+hcs-sg destroy  <name> [--project DIR] [--json] [--yes] [--verbose]
 ```
 
 - Credentials/config from environment (`HCS_AK`, `HCS_SK`,
   `HCS_PROJECT_ID`, `HCS_ENDPOINT`, optional CA bundle), same variables as
   the sibling service.
-- **Dry run is the default.** `apply` and `destroy` without `--execute`
-  only show what would happen (same output as `plan`) and touch nothing;
-  they end with the hint `Dry run — re-run with --execute to perform these
-  changes`. `--execute` prompts typed `yes` (typed group name for
-  `destroy`) and only then performs the real writes, unless `--yes` is
-  also given. `--yes` never implies `--execute`. `egress: []` /
-  `ingress: []` destruction additionally requires the same typed
-  confirmation. Under `--json` the prompt goes to stderr so stdout
+- **Dry run is the default; `--yes` is the single write gate.** `apply`
+  and `destroy` without `--yes` only show what would happen (same output
+  as `plan`) and touch nothing; they end with the hint `Dry run — re-run
+  with --yes to perform these changes`. With `--yes` the preview table
+  prints first (dry-run form, plus the clear-all WARNING line for
+  managed+empty directions) and only then the writes run — no prompts;
+  `--yes` IS the consent. `plan` (and `validate`/`schema`) accept no
+  `--yes`/`--execute` — parse-time rejection with guidance ("use
+  `apply --yes`"), so a read-only verb cannot be flipped into a writing
+  one by flag fumbling. `--verbose` streams progress to stderr (gateway
+  calls with budget, plan phases, per-action results); under `--json` the
+  preview and progress go to stderr so stdout
   stays pure JSON.
 - Output is single-language English (machine output must not mix languages).
 
@@ -211,7 +217,7 @@ interfaces are `nic`. `--json` emits the same action list as data (schema:
 `{actions: [{action, type, group, detail, cloud_id}], summary, quota,
 unmanaged, overlap}`).
 
-`apply --execute` prints the same table with a `RESULT` column (`ok`,
+`apply --yes` prints the same table with a `RESULT` column (`ok`,
 `throttled`, `failed` + error) and a closing summary line; a dry-run
 `apply` prints the plan table plus the dry-run hint.
 
@@ -312,7 +318,7 @@ Feasibility check against the real endpoint list is implementation step 0.
   gateway behind a `cloud_contract` marker — same protocol, same
   expectations (LSP made executable).
 - **CLI end-to-end**: argv → rendered table/JSON with a fake gateway
-  injected; dry-run default (`apply`/`destroy` without `--execute` perform
+  injected; dry-run default (`apply`/`destroy` without `--yes` perform
   zero gateway writes, asserted via the fake's call log); confirmation
   prompts; `--json` shape stability.
 - **Error paths are first-class**: quota exhaustion mid-apply, IP resolving
@@ -346,4 +352,4 @@ same model; per-project shared group registry.
 | 14 | Model self-validating; no pydantic | single schema, zero duplication |
 | 15 | CIDR allowed in source/destination from day one | public/office sources otherwise inexpressible |
 | 16 | New repo `hcs-sg-iac` | user choice; sibling repo untouched |
-| 17 | Dry run by default; `--execute` required for real writes; `--yes` never implies `--execute` | user requirement — safety must be opt-in, not opt-out |
+| 17 | Dry run by default; `--yes` is the single write gate (consent after preview) | user requirement — safety must be opt-in, not opt-out |

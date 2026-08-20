@@ -6,6 +6,7 @@ is the truth for membership.
 New groups: their CreateRule/AttachNic payloads carry sg_id="" — apply
 substitutes the id of the SG it just created for that group name."""
 import json
+import logging
 
 from hcs_sg_iac.model.actions import (Action, ActionList, AttachNic,
                                       CreateRule, CreateSg, DeleteRule,
@@ -14,6 +15,8 @@ from hcs_sg_iac.model.cloud import CloudRule, Snapshot
 from hcs_sg_iac.model.entities import DesiredState, Rule
 from hcs_sg_iac.model.remote import RemoteCidr, RemoteGroup
 from hcs_sg_iac.usecases.resolve import Resolution
+
+_log = logging.getLogger(__name__)   # --verbose: wired by the CLI
 
 
 def _q(s: str) -> str:
@@ -24,9 +27,11 @@ def _q(s: str) -> str:
 def read_snapshot(sg_reader, membership_reader) -> Snapshot:
     """Assemble the cloud snapshot via the reader protocols."""
     sgs = tuple(sg_reader.list_security_groups())
-    rules = {sg.id: list(sg_reader.list_rules(sg.id)) for sg in sgs}
-    attached = {sg.id: list(membership_reader.list_attached_nics(sg.id))
-                for sg in sgs}
+    rules, attached = {}, {}
+    for sg in sgs:
+        _log.info("reading rules for %s (%s)", sg.name, sg.id)
+        rules[sg.id] = list(sg_reader.list_rules(sg.id))
+        attached[sg.id] = list(membership_reader.list_attached_nics(sg.id))
     return Snapshot(sgs=sgs, rules=rules, attached=attached)
 
 
@@ -83,13 +88,19 @@ def plan(state: DesiredState, resolution: Resolution, snapshot: Snapshot) -> Act
     unmanaged: list = []
     clears: list = []                # managed+code-empty directions we strip
     id_to_name = {sg.id: sg.name for sg in snapshot.sgs}
-    name_to_sg: dict = {}
+    by_name: dict = {}
     for sg in snapshot.sgs:
-        if sg.name in name_to_sg:
-            raise ValueError(f"duplicate cloud security group name '{sg.name}' "
-                             f"({name_to_sg[sg.name].id}, {sg.id}) — "
-                             f"rename one in the cloud before planning")
-        name_to_sg[sg.name] = sg
+        by_name.setdefault(sg.name, []).append(sg)
+    dupes = {name: sgs for name, sgs in by_name.items() if len(sgs) > 1}
+    if dupes:
+        # Enumerate EVERY duplicated name with EVERY id — reporting only
+        # the first pair found hides the rest of the cleanup work.
+        raise ValueError(
+            "duplicate cloud security group name(s) — rename in the cloud "
+            "before planning: "
+            + "; ".join(f"'{name}' ({', '.join(s.id for s in sgs)})"
+                        for name, sgs in sorted(dupes.items())))
+    name_to_sg = {sg.name: sg for sg in snapshot.sgs}
 
     for sg in snapshot.sgs:
         if sg.name not in state.groups:
