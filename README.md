@@ -62,6 +62,36 @@ via `uv tool install ./dist/hcs_sg_iac-*.whl` or
 Configure) are still required at runtime; upgrade with
 `uv tool upgrade hcs-sg-iac` / `pipx upgrade hcs-sg-iac`.
 
+## Snapshot & drift (offline pre-work)
+
+Spend the rate budget ONCE on inventory, then plan as often as you like
+with zero cloud calls (and no credentials):
+
+    hcs-sg snapshot                          # whole cloud: 2 paged calls
+                                            # (SGs w/ embedded rules +
+                                            # all ports), writes
+                                            # snapshot.json
+    hcs-sg plan                              # snapshot.json present?
+                                            # used automatically, offline
+    hcs-sg apply --yes                       # plan offline, write live
+    hcs-sg drift [--json]                    # live cloud vs the file;
+                                            # rc 1 when anything drifted
+
+The inventory fast path uses `GET /v2.0/security-groups` (each SG's
+rules are embedded in the response) plus one unfiltered
+`GET /v1/{project_id}/ports` (membership via port.security_groups, the
+IP→NIC index via fixed_ips) — the whole estate in **2 paged calls**
+instead of 1 + 2N; every SDK endpoint is cross-checked against the HCS
+8.5.1 VPC API Reference. `--snapshot FILE` overrides the default
+`snapshot.json`; delete the file to read live again. After a write run
+the snapshot is deliberately NOT auto-updated (a snapshot is a
+point-in-time artifact, not a hidden state file): the CLI notes the
+staleness on stderr — refresh with `hcs-sg snapshot`, or verify what
+actually landed with `hcs-sg drift` (keyed by cloud IDs, so duplicate
+names never confuse it). `drift --json` emits a Liquibase-diff-shaped
+result (`missingObjects` / `unexpectedObjects` / `changedObjects` with
+per-field `referenceValue`/`comparedValue`).
+
 ## JSON Schema
 
 Editor/validation schemas for the config files, generated from the model

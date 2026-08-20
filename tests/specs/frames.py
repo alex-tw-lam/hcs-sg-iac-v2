@@ -111,6 +111,21 @@ def _cli(**kw) -> dict:
     return kw
 
 
+def _nic(ip, port):
+    return '{"port_id": "%s", "ip": "%s", "vm_name": null}' % (port, ip)
+
+
+def _snapshot(sgs=(("sg-web", "web"),), nics=(("10.0.1.10", "p1"),)):
+    """Snapshot JSON text: sgs as (id, name) pairs with empty desc, the
+    member-IP NIC index, and no rules/attachments recorded."""
+    sg_json = ", ".join('{"id": "%s", "name": "%s", "description": ""}'
+                        % (sid, name) for sid, name in sgs)
+    ip_json = ", ".join('"%s": [%s]' % (ip, _nic(ip, port))
+                        for ip, port in nics)
+    return ('{"sgs": [%s], "rules": {}, "attached": {}, '
+            '"nics_by_ip": {%s}}' % (sg_json, ip_json))
+
+
 FRAMES: list = [
     # ================= T1 backlog: A1 group-name validity =================
     Frame("NAME-01.a", 1, "A1", "single-char name is valid",
@@ -1215,6 +1230,63 @@ FRAMES: list = [
           **_cli(argv=["apply", "--yes"], expect_rc=0,
                  expect_out=("Plan: 2 to add", "RESULT", "Apply complete"),
                  expect_cloud=(("sg_exists", "web"),))),
+    Frame("SNAP-01", 3, "A23",
+          "snapshot exports the inventory into the project dir",
+          **_cli(argv=["snapshot"],
+                 cloud={"sgs": [{"id": "sg-web", "name": "web"}],
+                        "nics": [{"port_id": "p1", "ip": "10.0.1.10"}],
+                        "attached": [["sg-web", "p1"]]},
+                 expect_rc=0,
+                 expect_out=("snapshot: 1 groups", "1 members"),
+                 expect_files=("snapshot.json",))),
+    Frame("SNAP-02", 3, "A23",
+          "plan --snapshot is fully offline: no creds, zero cloud reads",
+          files={"groups/web.yaml": _group(),
+                 "snapshot.json": _snapshot()},
+          argv=["plan", "--snapshot", "snapshot.json"],
+          inject_gateway=False, expect_rc=0,
+          env={"HCS_AK": None, "HCS_SK": None, "HCS_PROJECT_ID": None,
+               "HCS_ENDPOINT": None},
+          expect_out=("+", "member", "Dry run")),
+    Frame("SNAP-03", 3, "A23",
+          "apply --yes --snapshot warns the file is now stale",
+          files={"groups/web.yaml": _group(members=()),
+                 "snapshot.json": _snapshot(nics=())},
+          cloud={"sgs": [{"id": "sg-web", "name": "web", "description": ""}]},
+          argv=["apply", "--yes", "--snapshot", "snapshot.json"],
+          expect_rc=0, expect_err=("stale", "hcs-sg drift")),
+    Frame("SNAP-04", 3, "A23",
+          "snapshot.json present: plan uses it with no flag, no creds",
+          files={"groups/web.yaml": _group(),
+                 "snapshot.json": _snapshot()},
+          argv=["plan"],
+          inject_gateway=False, expect_rc=0,
+          env={"HCS_AK": None, "HCS_SK": None, "HCS_PROJECT_ID": None,
+               "HCS_ENDPOINT": None},
+          expect_out=("+", "member", "Dry run"),
+          expect_err=("planning from snapshot.json",)),
+    Frame("DRIFT-01", 3, "A23",
+          "drift lists cloud changes since the snapshot, rc 1",
+          files={"groups/web.yaml": _group(members=()),
+                 "snapshot.json": _snapshot()},
+          cloud={"nics": [{"port_id": "p1", "ip": "10.0.1.10"}]},
+          argv=["drift", "--snapshot", "snapshot.json"], expect_rc=1,
+          expect_out=("- group web (sg-web) deleted", "Drift:")),
+    Frame("DRIFT-02", 3, "A23",
+          "drift with an identical cloud exits 0",
+          files={"groups/web.yaml": _group(members=()),
+                 "snapshot.json": _snapshot()},
+          cloud={"sgs": [{"id": "sg-web", "name": "web", "description": ""}]},
+          argv=["drift", "--snapshot", "snapshot.json"], expect_rc=0,
+          expect_out=("no drift",)),
+    Frame("DRIFT-03", 3, "A23",
+          "drift --json emits the liquibase-shaped diff",
+          files={"groups/web.yaml": _group(members=()),
+                 "snapshot.json": _snapshot()},
+          cloud={"sgs": [{"id": "sg-x", "name": "extra", "description": ""}]},
+          argv=["drift", "--json"], expect_rc=1,      # auto snapshot.json
+          expect_out=('"diff"', '"missingObjects"',
+                      '"unexpectedObjects"', '"changedObjects"')),
 ]
 
 TIER1 = [f for f in FRAMES if f.tier == 1]

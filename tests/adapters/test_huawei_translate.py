@@ -11,6 +11,7 @@ from huaweicloudsdkcore.exceptions.exceptions import (ClientRequestException,
 from hcs_sg_iac.adapters.huawei_gateway import (HuaweiGateway, _METHODS,
                                                 _bounds, build_gateway)
 from hcs_sg_iac.adapters.ratelimit import FixedWindowLimiter
+from hcs_sg_iac.model.cloud import CloudRule
 from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
 
 
@@ -123,6 +124,7 @@ def test_huawei_chokepoint_429_becomes_throttled_and_halves_limit():
     with pytest.raises(CloudThrottled) as ei:
         gw.list_security_groups()
     assert "APIGW.0301" in str(ei.value)
+    assert "calls before throttle: list_security_groups" in str(ei.value)
     assert ei.value.retry_at == 1300.0   # frozen clock 1000 + 300s window
     assert gw.quota_snapshot()["effective_limit"] == 2   # 4 // 2: halved
 
@@ -140,6 +142,7 @@ def test_huawei_chokepoint_budget_exhaustion_short_circuits_sdk():
     with pytest.raises(QuotaExhausted) as ei:
         gw.list_security_groups()
     assert ei.value.retry_at == 1300.0   # wait-and-continue deadline
+    assert "last calls: list_security_groups" in str(ei.value)  # the trail
     assert len(calls) == 1          # budget guard fired BEFORE any SDK call
 
 
@@ -173,6 +176,47 @@ def test_huawei_chokepoint_client_request_429_also_throttles_with_deadline():
     assert "429" in str(ei.value)
     assert ei.value.retry_at == 1300.0
     assert gw.quota_snapshot()["effective_limit"] == 2
+
+
+def test_inventory_whole_cloud_in_two_calls():
+    """The rate saver: neutron_list_security_groups EMBEDS each SG's
+    rules and one unfiltered list_ports yields membership + the IP→NIC
+    index — the entire estate in exactly 2 paged calls (vs the
+    1 + 2N fallback), with sg_id taken from the parent SG (embedded
+    rule JSON carries none)."""
+    embedded_rule = SimpleNamespace(id="r-1", direction="ingress",
+                                    security_group_id=None, protocol="tcp",
+                                    port_range_min=80, port_range_max=80,
+                                    remote_group_id=None,
+                                    remote_ip_prefix="10.0.0.0/8")
+    sg = SimpleNamespace(id="sg-1", name="web", description="d",
+                         security_group_rules=[embedded_rule])
+    port = SimpleNamespace(
+        id="p-1", fixed_ips=[SimpleNamespace(ip_address="10.0.1.10")],
+        security_groups=["sg-1"],
+        dns_assignment=[{"hostname": "vm-a", "ip_address": "10.0.1.10"}])
+    calls = []
+
+    def handler(req):
+        calls.append(type(req).__name__)
+        if type(req).__name__ == "NeutronListSecurityGroupsRequest":
+            return SimpleNamespace(security_groups=[sg])
+        return SimpleNamespace(ports=[port])
+
+    gw = HuaweiGateway(
+        SimpleNamespace(neutron_list_security_groups=handler,
+                        list_ports=handler),
+        FixedWindowLimiter(budget=10, window_seconds=300,
+                           clock=lambda: 1000.0))
+    snap, nics = gw.inventory()
+    assert [s.name for s in snap.sgs] == ["web"]
+    assert snap.rules["sg-1"][0] == CloudRule(
+        id="r-1", sg_id="sg-1", direction="ingress", protocol="tcp",
+        ports="80", remote_group_id=None, remote_ip_prefix="10.0.0.0/8")
+    assert [n.port_id for n in snap.attached["sg-1"]] == ["p-1"]
+    assert nics["10.0.1.10"][0].vm_name == "vm-a"
+    assert calls.count("NeutronListSecurityGroupsRequest") == 1
+    assert calls.count("ListPortsRequest") == 1        # the whole estate
 
 
 def test_ssl_verify_false_mutes_the_insecure_request_warning():
