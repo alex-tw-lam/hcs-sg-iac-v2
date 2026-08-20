@@ -173,6 +173,7 @@ def plan(state: DesiredState, resolution: Resolution, snapshot: Snapshot) -> Act
             cloud_now = [r for r in (snapshot.rules.get(cloud_sg.id, [])
                                      if cloud_sg else [])
                          if r.direction == direction]
+            own_id = cloud_sg.id if cloud_sg else None
             subs = list({s.identity(): s
                          for r in wanted for s in _sub_rules(r)}.values())
             wanted_ids = {s.identity() for s in subs}
@@ -185,18 +186,26 @@ def plan(state: DesiredState, resolution: Resolution, snapshot: Snapshot) -> Act
                         cloud_id=None,
                         op=CreateRule(sg_id=cloud_sg.id if cloud_sg else "",
                                       rule=s)))
+            # HCS auto-adds self-referential rules on SG create (allow
+            # within the SG: remote_group_id = the SG's own id). They
+            # stay in cloud_now so a CODED self-reference still matches
+            # them (no duplicate create), but they are never stale —
+            # convergence must not strip the cloud's own defaults, not
+            # even for a managed [] direction.
             stale = [cr for cr in cloud_now
-                     if _cloud_rule_identity(cr, id_to_name) not in wanted_ids]
+                     if _cloud_rule_identity(cr, id_to_name) not in wanted_ids
+                     and cr.remote_group_id != own_id]
             for cr in stale:
                 actions.append(Action(
                     "-", "rule", gname,
                     _cloud_rule_detail(cr, id_to_name),
                     cloud_id=cr.id, op=DeleteRule(rule_id=cr.id)))
             # A managed direction with an empty code list strips every
-            # cloud rule: that fact travels as data (clears), so the
-            # clear-all warning never parses display strings. Only when
-            # stale is non-empty — a []-direction with no cloud rules
-            # deletes nothing and must not raise a false alarm.
+            # cloud rule except the preserved self rules: that fact
+            # travels as data (clears), so the clear-all warning never
+            # parses display strings. Only when stale is non-empty — a
+            # []-direction with nothing (or only self rules) to delete
+            # must not raise a false alarm.
             if not wanted and stale:
                 clears.append(f"{direction} rules of {gname}")
 

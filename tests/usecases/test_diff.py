@@ -7,7 +7,7 @@ from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.model.cloud import CloudRule, CloudSg
 from hcs_sg_iac.model.entities import (DesiredState, Group, Rule,
                                        RulesFile)
-from hcs_sg_iac.model.remote import RemoteCidr
+from hcs_sg_iac.model.remote import RemoteCidr, RemoteGroup
 from hcs_sg_iac.usecases.plan import plan_destroy, read_snapshot
 from tests.helpers import plan_state
 
@@ -51,6 +51,39 @@ def test_duplicate_cloud_names_report_every_instance():
                   "'db'", "sg-d1", "sg-d2"):
         assert token in msg, token
     assert "fine" not in msg                 # the un-duplicated name stays out
+
+
+def test_cloud_self_rules_are_preserved_across_convergence():
+    """HCS auto-adds self-referential rules on SG create (remote_group_id
+    = the SG itself). Unique here: they survive a managed non-empty
+    direction (only true stale goes), a managed [] direction (nothing
+    stripped, no false clear), and a CODED self-reference converges
+    against the existing self rule instead of duplicating it."""
+    gw = _gw_one_sg("web", [
+        CloudRule(id="self-i", sg_id="sg-web", direction="ingress",
+                  protocol=None, ports=None,
+                  remote_group_id="sg-web", remote_ip_prefix=None),
+        CloudRule(id="stale-i", sg_id="sg-web", direction="ingress",
+                  protocol="tcp", ports="22",
+                  remote_group_id=None, remote_ip_prefix="0.0.0.0/0"),
+        CloudRule(id="self-e", sg_id="sg-web", direction="egress",
+                  protocol=None, ports=None,
+                  remote_group_id="sg-web", remote_ip_prefix=None)])
+    # ingress managed with one wanted rule; egress managed + [] — the
+    # self rules in BOTH directions must survive, stale tcp/22 must go
+    state = _state_one("web", RulesFile("web",
+        (Rule("ingress", "tcp", "80", RemoteCidr("0.0.0.0/0")),),
+        (), True, True))
+    al = plan_state(gw, state)
+    assert [a.detail for a in al.actions if a.sign == "-" and a.type == "rule"] \
+        == ["ingress tcp 22 from cidr:0.0.0.0/0"]
+    assert al.clears == ()      # egress [] strips nothing: only self rules
+
+    # a coded self-reference matches the cloud's auto self rule
+    state2 = _state_one("web", RulesFile("web",
+        (Rule("ingress", "all", None, RemoteGroup("web")),), (), True, False))
+    al2 = plan_state(gw, state2)
+    assert [(a.sign, a.type) for a in al2.actions] == [("-", "rule")]
 
 
 # ---- clear-all set (ActionList.clears): data, not display parsing ----

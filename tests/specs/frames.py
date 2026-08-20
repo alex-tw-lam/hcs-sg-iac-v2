@@ -1002,6 +1002,28 @@ FRAMES: list = [
                  "rules/web.yaml": _rules(sg="web", empty=("ingress", "egress"))},
           cloud={"sgs": [{"id": "sg-web", "name": "web"}]},
           expect_actions=(), expect_clears=(), expect_unmanaged=()),
+    Frame("PLAN-19", 2, "A17",
+          "auto self rules survive; true stale still converges",
+          usecase="plan",
+          files={"groups/web.yaml": _group(members=()),
+                 "rules/web.yaml": _rules(
+                     sg="web", ingress=(("0.0.0.0/0", "tcp", "80"),),
+                     empty=("egress",))},
+          cloud={"sgs": [{"id": "sg-web", "name": "web"}],
+                 "rules": [
+                     # HCS create auto-adds allow-within-SG rules:
+                     {"id": "self-i", "sg": "sg-web", "direction": "ingress",
+                      "rgid": "sg-web"},
+                     {"id": "self-e", "sg": "sg-web", "direction": "egress",
+                      "rgid": "sg-web"},
+                     {"id": "stale-i", "sg": "sg-web", "direction": "ingress",
+                      "protocol": "tcp", "ports": "22",
+                      "prefix": "0.0.0.0/0"}]},
+          # self rules in BOTH directions survive (no delete for them,
+          # no false clear from the [] egress); stale tcp/22 still goes
+          expect_actions=(("+", "rule", "web"),
+                          ("-", "rule", "web", "ingress tcp 22")),
+          expect_clears=()),
     Frame("DSTR-01", 2, "A15",
           "destroy detaches every member then deletes the SG",
           usecase="destroy", model_input="x",
