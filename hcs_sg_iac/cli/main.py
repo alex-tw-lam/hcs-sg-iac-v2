@@ -474,6 +474,8 @@ def _cmd_snapshot(args, ctx: _Ctx) -> int:
 
 
 def _cmd_destroy(args, ctx: _Ctx) -> int:
+    if ctx.readers is None:  # _resolve_ctx guarantees it for destroy
+        return 1
     al = pipeline.plan_destroy_project(
         ctx.readers, args.name, sleep=time.sleep, notify=_notify
     )
@@ -492,6 +494,8 @@ def _cmd_destroy(args, ctx: _Ctx) -> int:
 
 
 def _cmd_plan_apply(args, ctx: _Ctx) -> int:
+    if ctx.readers is None:  # _resolve_ctx guarantees it for plan/apply
+        return 1
     planned, errors = pipeline.plan_project(
         yaml_config.load_project,
         ctx.readers,
