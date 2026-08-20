@@ -67,7 +67,9 @@ class Action:
     group: str
     detail: str
     cloud_id: str | None = None
-    op: "Payload | None" = None  # payload above; None for display-only rows
+    op: "CreateSg | UpdateSg | DeleteSg | AttachNic | DetachNic | CreateRule | DeleteRule | None" = (
+        None  # payload above; None for display-only rows
+    )
 
 
 @dataclass(frozen=True)

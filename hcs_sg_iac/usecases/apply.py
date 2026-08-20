@@ -1,12 +1,9 @@
 # hcs_sg_iac/usecases/apply.py
 """Execute an ActionList through the writer protocols. Sequential —
 the rate budget beats parallelism. Per-action isolation: a failure
-never aborts the run (dependents of a failed group create are skipped,
-not orphaned); quota exhaustion throttles the REST — unless a `sleep`
-hook is injected (the CLI passes time.sleep): then an exhaustion that
-carries a retry deadline (QuotaExhausted.retry_at / CloudThrottled
-.retry_at, set by the gateway from the limiter window) waits for the
-window to roll over and RETRIES the same action, so a run continues
+never aborts the run; dependents of a failed group create are skipped,
+not orphaned. With a `sleep` hook injected, rate exhaustion carrying a
+retry deadline waits the window out and retries — a run continues
 across windows instead of stopping."""
 
 import logging

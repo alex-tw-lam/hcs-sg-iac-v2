@@ -20,7 +20,7 @@ from hcs_sg_iac.model.actions import (
     DetachNic,
     UpdateSg,
 )
-from hcs_sg_iac.model.cloud import CloudRule, Snapshot
+from hcs_sg_iac.model.cloud import Snapshot
 from hcs_sg_iac.model.common import RemoteGroup
 from hcs_sg_iac.model.entities import DesiredState, Rule
 from hcs_sg_iac.model.portset import PortSet
@@ -43,7 +43,7 @@ def read_snapshot(gateway) -> Snapshot:
 
 
 def _sub_rules(rule: Rule) -> tuple:
-    """docs/design-spec.md §6: one code rule with a multi-entry ports
+    """One code rule with a multi-entry ports
     list expands to one cloud rule per entry ("22,443" -> "22" + "443");
     ports=None stays a single rule. Cloud identities are always
     single-range, so planning against the expanded sub-rules is what
@@ -70,17 +70,6 @@ def _fmt_rule_detail(direction: str, protocol: str, ports, remote) -> str:
     )
     prep = "from" if direction == "ingress" else "to"
     return f"{direction} {protocol} {ports or 'all'} {prep} {remote_s}"
-
-
-def _rule_detail(rule: Rule) -> str:
-    return _fmt_rule_detail(
-        rule.direction, rule.protocol, rule.ports, rule.remote
-    )
-
-
-def _cloud_rule_detail(cr: CloudRule, id_to_name: dict) -> str:
-    direction, protocol, ports, remote = cr.identity(id_to_name)
-    return _fmt_rule_detail(direction, protocol, ports, remote)
 
 
 def _name_to_sg(snapshot: Snapshot) -> dict:
@@ -200,7 +189,7 @@ def _plan_managed_direction(
                     "+",
                     "rule",
                     gname,
-                    _rule_detail(s),
+                    _fmt_rule_detail(*s.identity()),
                     cloud_id=None,
                     op=CreateRule(
                         sg_id=cloud_sg.id if cloud_sg else "", rule=s
@@ -219,7 +208,7 @@ def _plan_managed_direction(
                 "-",
                 "rule",
                 gname,
-                _cloud_rule_detail(cr, id_to_name),
+                _fmt_rule_detail(*cr.identity(id_to_name)),
                 cloud_id=cr.id,
                 op=DeleteRule(rule_id=cr.id),
             )

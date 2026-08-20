@@ -1,11 +1,11 @@
-# tach.toml — the ring-direction contract (docs/architecture.md).
+# tach.toml — the ring-direction contract (README §Architecture).
 # Four RING-LEVEL modules keep this tiny: sibling imports inside a ring
 # (usecases/pipeline -> usecases/plan, adapters/huawei_gateway ->
 # adapters/ratelimit) are internal by construction and need no lines
 # here. Per-FILE third-party designation is NOT tach's job — that stays
 # in tests/test_architecture.py (the registry that fails on
 # unregistered adapter files).
-exclude = ["**/__pycache__", ".venv", "tests", "docs", "schemas"]
+exclude = ["**/__pycache__", ".venv", "tests"]
 source_roots = ["."]
 
 [[modules]]

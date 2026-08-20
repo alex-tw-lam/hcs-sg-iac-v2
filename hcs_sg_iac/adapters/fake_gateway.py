@@ -66,7 +66,7 @@ class FakeGateway:
                 f"fake budget exhausted ({self.budget} calls)"
             )
 
-    # -- SgReader --
+    # -- reads --
     def list_security_groups(self) -> list:
         sgs = list(self._sgs.values())
         self._trace("list_security_groups")
@@ -77,7 +77,7 @@ class FakeGateway:
         self._trace("list_rules")
         return rules
 
-    # -- MembershipReader --
+    # -- membership --
     def find_nics_by_ip(self, ips: list) -> dict:
         found = {ip: [n for n in self._nics if n.ip == ip] for ip in ips}
         self._trace("find_nics_by_ip")
@@ -112,7 +112,7 @@ class FakeGateway:
             nics_by_ip=nics,
         )
 
-    # -- SgWriter --
+    # -- writers --
     def create_security_group(self, name: str, description: str) -> CloudSg:
         self._spend(f"create_sg:{name}")
         sg = CloudSg(id=self._id(), name=name, description=description)
@@ -139,7 +139,6 @@ class FakeGateway:
         self._attached = {(s, p) for s, p in self._attached if s != sg_id}
         self._trace(f"delete_sg:{sg_id}")
 
-    # -- SgRuleWriter --
     def create_rule(self, sg_id: str, rule) -> CloudRule:
         self._spend(f"create_rule:{sg_id}")
         remote_group_id = None
@@ -171,7 +170,7 @@ class FakeGateway:
         self._rules.pop(rule_id)
         self._trace(f"delete_rule:{rule_id}")
 
-    # -- NicBinder --
+    # -- binder --
     def attach_nic(self, sg_id: str, port_id: str) -> None:
         self._spend(f"attach:{port_id}->{sg_id}")
         if port_id not in {n.port_id for n in self._nics}:
@@ -188,7 +187,6 @@ class FakeGateway:
     def quota_snapshot(self) -> Quota:
         limit = 25 if self.budget is None else self.budget
         return Quota(
-            service_budget_calls=limit,
             used_calls=len(self.call_log),
             effective_limit=limit,
             window_resets_at=None,

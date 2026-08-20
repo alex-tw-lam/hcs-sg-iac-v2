@@ -1,24 +1,10 @@
 # hcs_sg_iac/usecases/importer.py
-"""Reverse import: a cloud Snapshot becomes desired-state entities —
-the "adopt the estate" path (NOT MANAGED -> managed) without touching
-the cloud.
-
-The mapping is deliberately conservative: anything the config format
-cannot represent EXACTLY is skipped with a note, never silently
-dropped nor approximated. A skipped RULE is no longer wanted, so the
-next plan shows it as a stale delete (apply would remove it) — the
-notes below say so; a skipped GROUP is simply left unmanaged (the plan
-never touches it). Skipped cases:
-- names failing the group-name rule (the filename must equal the name);
-- duplicate cloud names (config keys groups by name; only the first
-  name occurrence is kept — and rules that referenced a loser by id are
-  skipped too, they would silently re-point at the winner);
-- self-referential rules (implicit: the platform re-adds them on create
-  and the plan engine preserves them as never-stale);
-- IPv6 remotes, unknown protocols, duplicate rule identities.
-
-Every imported group gets BOTH directions managed — after import,
-`hcs-sg plan` reconciles the cloud to the files."""
+"""Reverse import: a cloud Snapshot becomes config files — the
+"adopt the estate" path, offline. Deliberately conservative: anything
+the config format cannot represent EXACTLY is skipped WITH a note,
+never silently approximated (a skipped RULE becomes an honest stale
+delete on the next plan; a skipped GROUP stays unmanaged). Both
+directions of every imported group are managed."""
 
 from dataclasses import dataclass, field
 
@@ -71,17 +57,6 @@ def _representable(snap: Snapshot) -> "tuple[dict, list]":
     return representable, notes
 
 
-def _members(nics) -> tuple:
-    """Attached NICs -> member IPs (v4 only, deduplicated)."""
-    members, seen = [], set()
-    for n in nics:
-        if not n.ip or "." not in n.ip or n.ip in seen:
-            continue  # no v4 address / same member twice
-        seen.add(n.ip)
-        members.append(Member(ip=n.ip))
-    return tuple(members)
-
-
 def import_snapshot(snap: Snapshot) -> ImportedState:
     representable, notes = _representable(snap)
     id_to_name = {s.id: s.name for s in snap.sgs}
@@ -92,7 +67,14 @@ def import_snapshot(snap: Snapshot) -> ImportedState:
         name = representable.get(sg.id)
         if name is None:
             continue
-        members = _members(snap.attached.get(sg.id, ()))
+        members = tuple(
+            Member(ip=ip)
+            for ip in dict.fromkeys(  # order-preserving dedupe
+                n.ip
+                for n in snap.attached.get(sg.id, ())
+                if n.ip and "." in n.ip
+            )
+        )
         wanted: dict = {"ingress": [], "egress": []}
         identities: dict = {"ingress": set(), "egress": set()}
         self_rules = 0

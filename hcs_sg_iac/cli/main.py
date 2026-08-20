@@ -10,7 +10,6 @@ import logging
 import os
 import sys
 import time
-import typing
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +18,7 @@ from hcs_sg_iac.adapters.snapshot_gateway import SnapshotGateway
 from hcs_sg_iac.cli import render
 from hcs_sg_iac.model.cloud import snapshot_from_json, snapshot_to_json
 from hcs_sg_iac.model.common import CloudError, CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.gateway import CloudGateway, CloudReader
 from hcs_sg_iac.usecases import drift as drift_uc
 from hcs_sg_iac.usecases import importer, pipeline
 from hcs_sg_iac.usecases.plan import read_snapshot
@@ -54,11 +54,9 @@ def load_config() -> Config:
 
 
 class _ReadOnlyPlanParser(argparse.ArgumentParser):
-    """Read-only verbs (plan/validate) accept no --execute/--yes:
-    the writing flag cannot reach them by flag fumbling — parse-time
-    rejection (exit 2) that says what to run instead. argparse funnels
-    subparser unrecognized-arg errors here, so the guard sits on the
-    root parser (and is inherited harmlessly by the subparsers)."""
+    """Read-only verbs reject --yes at parse time (exit 2) with the
+    command to run instead; the guard sits on the root parser so
+    subparser unrecognized-arg errors funnel here."""
 
     def error(self, message):
         if "unrecognized" in message and (
@@ -174,11 +172,9 @@ class _VerboseHandler(logging.StreamHandler):
 
 
 def _configure_logging() -> None:
-    """--verbose: per-call/phase/action progress to stderr; stdout stays
-    pure (JSON-safe). Without the flag no handler exists, so INFO records
-    go nowhere. Handler binds sys.stderr at call time (test-friendly) and
-    wiring twice in one process adds no duplicate lines (embedders and
-    test runners call main() repeatedly)."""
+    """--verbose: one stderr handler for the hcs_sg_iac logger tree;
+    idempotent across repeated main() calls, rebinds sys.stderr each
+    time (capture-friendly). Without the flag, no handler exists."""
     log = logging.getLogger("hcs_sg_iac")
     ours = next(
         (h for h in log.handlers if isinstance(h, _VerboseHandler)), None
@@ -209,10 +205,8 @@ def _print_plan(al, *, quota, args, executed=None) -> None:
 
 
 def _print_preview(gateway, al, args) -> None:
-    """The plan table shown BEFORE a confirmation prompt — "the changes
-    above" the prompt refers to must already be on screen. Dry-run form:
-    no RESULT column, no Dry-run trailer. Under --json the preview goes
-    to stderr so stdout stays one pure JSON document."""
+    """The plan table shown before the writes (--yes IS the consent).
+    Under --json the preview goes to stderr so stdout stays pure."""
     table = render.render_plan(
         al, quota=pipeline.quota(gateway, al.actions), dry_run=False
     )
@@ -225,10 +219,8 @@ def _notify(msg: str) -> None:
 
 
 def _snapshot_stale_note(snap_arg) -> None:
-    """Writes just landed against a plan built from --snapshot: the file
-    is now stale. Deliberately NOT auto-updated — a snapshot is a
-    point-in-time artifact, not a hidden state file (the repo's
-    no-state-file rule); refresh or verify explicitly."""
+    """Writes landed: the snapshot file is now stale. Deliberately NOT
+    auto-updated — refresh or verify explicitly."""
     if snap_arg:
         print(
             f"hcs-sg: note: {snap_arg} is now stale (writes applied) — "
@@ -263,15 +255,12 @@ class _Ctx:
     the post-write staleness note needs."""
 
     project: Path
-    # Any: the CLI drives every Protocol role (reader/writer/binder) of
-    # whichever gateway it was handed — no single type says that.
-    gateway: typing.Any = None
-    readers: typing.Any = None
+    gateway: "CloudGateway | None" = None
+    readers: "CloudReader | None" = None
     snap_arg: "str | None" = None
     snap_file: "Path | None" = None
     auto: bool = False
     yes: bool = False
-    offline: bool = False
 
     def stale_note_source(self):
         return self.snap_arg or ("snapshot.json" if self.auto else None)
@@ -338,7 +327,6 @@ def _resolve_ctx(args, project, gateway) -> "tuple[_Ctx, int | None]":
             snap_file=snap_file,
             auto=auto,
             yes=yes,
-            offline=offline,
         ),
         None,
     )
@@ -475,20 +463,10 @@ def _cmd_drift(args, ctx: _Ctx) -> int:
 
 def _cmd_snapshot(args, ctx: _Ctx) -> int:
     _log.info("phase: snapshotting the cloud")
-    state, report = yaml_config.load_project(ctx.project)
-    if state is None:
-        print("\n".join(report.errors), file=sys.stderr)
+    if ctx.gateway is None:  # _resolve_ctx guarantees it for snapshot
         return 1
-    gateway = ctx.gateway
-    if hasattr(gateway, "inventory"):  # whole cloud, 2 calls
-        inv = gateway.inventory()
-        snap, nics_by_ip = inv.snapshot, inv.nics_by_ip
-    else:  # protocol-level fallback
-        all_ips = sorted(
-            {m.ip for g in state.groups.values() for m in g.members}
-        )
-        nics_by_ip = gateway.find_nics_by_ip(all_ips) if all_ips else {}
-        snap = read_snapshot(gateway)
+    inv = ctx.gateway.inventory()  # the whole cloud, 2 calls
+    snap, nics_by_ip = inv.snapshot, inv.nics_by_ip
     path = ctx.project / args.out
     path.write_text(
         snapshot_to_json(snap.sgs, snap.rules, snap.attached, nics_by_ip),
@@ -578,7 +556,3 @@ def main(argv=None, gateway=None) -> int:
     except (CloudError, CloudThrottled, QuotaExhausted) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())

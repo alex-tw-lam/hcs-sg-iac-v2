@@ -6,21 +6,7 @@ from hcs_sg_iac.adapters import yaml_config
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.usecases import importer, pipeline
 
-from tests.conftest import make_project, seed
-
-
-def _cloud_rule(**kw):
-    base = {
-        "id": "r1",
-        "sg_id": "sg-web",
-        "direction": "ingress",
-        "protocol": "tcp",
-        "ports": "22",
-        "remote_group_id": None,
-        "remote_ip_prefix": "203.0.113.0/24",
-    }
-    base.update(kw)
-    return base
+from tests.conftest import cloud_rule, make_project, seed
 
 
 def _write_and_plan(tmp_path, gw):
@@ -39,22 +25,22 @@ def test_import_then_plan_converges(tmp_path):
         FakeGateway(),
         sgs=(("sg-web", "web", "web tier"), ("sg-db", "db", "")),
         rules=(
-            _cloud_rule(
+            cloud_rule(
                 id="r-self",
                 remote_group_id="sg-web",
                 remote_ip_prefix=None,
                 protocol="icmp",
                 ports=None,
             ),
-            _cloud_rule(id="r-ssh"),
-            _cloud_rule(
+            cloud_rule(id="r-ssh"),
+            cloud_rule(
                 id="r-db",
                 sg_id="sg-db",
                 ports="5432",
                 remote_group_id="sg-web",
                 remote_ip_prefix=None,
             ),
-            _cloud_rule(
+            cloud_rule(
                 id="r-any",
                 sg_id="sg-db",
                 protocol=None,
@@ -77,7 +63,7 @@ def test_unrepresentable_remote_is_delete_planned(tmp_path):
         FakeGateway(),
         sgs=(("sg-db", "db", ""),),
         rules=(
-            _cloud_rule(
+            cloud_rule(
                 id="r-v6",
                 sg_id="sg-db",
                 direction="egress",
@@ -110,7 +96,7 @@ def test_unset_remote_imports_as_anywhere(tmp_path):
         FakeGateway(),
         sgs=(("sg-a", "app", ""),),
         rules=(
-            _cloud_rule(
+            cloud_rule(
                 id="r1",
                 sg_id="sg-a",
                 protocol=None,

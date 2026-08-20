@@ -50,16 +50,6 @@ def _load_yaml(path: Path, where: str, report: Report) -> object:
         return _FAILED
 
 
-def _warn_yml_siblings(directory: Path, label: str, report: Report) -> None:
-    if not directory.is_dir():
-        return
-    for path in sorted(directory.glob("*.yml")):
-        report.warning(
-            f"{label}/{path.name}",
-            "ignoring .yml file: expected .yaml extension",
-        )
-
-
 def _load_direction_file(
     entry: Path,
     where_dir: str,
@@ -90,7 +80,6 @@ def _load_per_sg_layout(
     that direction is UNMANAGED (same semantics as an absent section in
     the flat layout); a file containing [] manages-and-removes-all."""
     sgs_dir = root / "security-groups"
-    _warn_yml_siblings(sgs_dir, "security-groups", report)
     groups: dict[str, Group] = {}
     rules: dict[str, RulesFile] = {}
     for entry in sorted(sgs_dir.iterdir()):
@@ -98,12 +87,7 @@ def _load_per_sg_layout(
             continue  # markers, not groups
         where_dir = f"security-groups/{entry.name}"
         if not entry.is_dir():
-            report.warning(
-                where_dir,
-                "ignoring stray file: expected a directory "
-                "per security group",
-            )
-            continue
+            continue  # stray file at the top level: not a group
         if not GROUP_NAME_RE.fullmatch(entry.name):
             report.error(
                 where_dir,
@@ -129,14 +113,6 @@ def _load_per_sg_layout(
                 f"({entry.name!r} != {g.name!r})",
             )
             continue
-        for stray in sorted(entry.iterdir()):
-            if (
-                stray.name not in ("group.yaml", "ingress.yaml", "egress.yaml")
-                and stray.is_file()
-            ):
-                report.warning(
-                    f"{where_dir}/{stray.name}", "ignoring unexpected file"
-                )
         groups[g.name] = g
         ingress, ing_managed = _load_direction_file(
             entry, where_dir, "ingress", "source", report
@@ -211,7 +187,7 @@ def _rule_to_dict(r) -> dict:
 
 
 def dump_group(g) -> str:
-    """Group entity -> groups/<name>.yaml text (the parse_group inverse).
+    """Group entity -> group.yaml text (the parse_group inverse).
     An empty members list is omitted — absent and [] parse the same."""
     d: dict = {"name": g.name, "description": g.description}
     if g.members:

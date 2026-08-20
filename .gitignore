@@ -8,4 +8,3 @@ build/
 .venv/
 .DS_Store
 uv.lock
-audit.jsonl

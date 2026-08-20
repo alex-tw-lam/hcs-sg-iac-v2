@@ -36,7 +36,7 @@ def resolve_memberships(reader, state: DesiredState) -> Resolution:
                 )
                 report.error(
                     f"security-groups/{g.name}/group.yaml",
-                    f"ip {m.ip}: matches multiple NICs ({cands}) — "
+                    f"ip {m.ip}: matches multiple NICs ({cands})"
                     f"use a unique IP or a nic: entry",
                 )
             else:

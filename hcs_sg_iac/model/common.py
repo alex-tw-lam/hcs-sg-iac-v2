@@ -12,13 +12,9 @@ class Report:
 
     def __init__(self):
         self.errors: list = []
-        self.warnings: list = []
 
     def error(self, where: str, message: str) -> None:
         self.errors.append(f"{where}: {message}")
-
-    def warning(self, where: str, message: str) -> None:
-        self.warnings.append(f"{where}: {message}")
 
     @property
     def ok(self) -> bool:
@@ -70,14 +66,19 @@ def parse_remote(value: str):
     unambiguous; a bare IP becomes its /32."""
     if not value.strip():
         raise ValueError(f"empty remote: {value!r}")
-    if "/" in value or _looks_like_ip(value):
+    if "/" in value or looks_like_ip(value):
         return RemoteCidr(cidr=value)
     return RemoteGroup(name=value)
 
 
-def _looks_like_ip(name: str) -> bool:
+def looks_like_ip(value: str) -> bool:
+    """IP or CIDR shaped (group names can never be, by the charset rule
+    in entities — so a plain string is unambiguous)."""
     try:
-        ipaddress.ip_address(name)
+        if "/" in value:
+            ipaddress.ip_network(value, strict=False)
+        else:
+            ipaddress.ip_address(value)
         return True
     except ValueError:
         return False

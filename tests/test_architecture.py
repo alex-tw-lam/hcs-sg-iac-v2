@@ -2,12 +2,7 @@
 """Third-party designation: model/, usecases/ and cli/ import stdlib +
 hcs_sg_iac only; adapters/ files import EXACTLY their designated
 third-party lib (an unregistered adapter file FAILS — additions are
-deliberate).
-
-Ring DIRECTION (imports point inward, siblings never see each other) is
-tach's job: tach.toml declares four ring-level modules and
-`tach check` enforces them — keep both sources true to
-docs/architecture.md.
+deliberate). Ring DIRECTION is tach's job (tach.toml).
 """
 
 import ast
@@ -26,7 +21,6 @@ ADAPTER_THIRD_PARTY = {
     "huawei_gateway.py": {"huaweicloudsdkcore", "huaweicloudsdkvpc"},
     "ratelimit.py": set(),
     "fake_gateway.py": set(),
-    "audit.py": set(),
     "snapshot_gateway.py": set(),
     "__init__.py": set(),
 }
@@ -44,42 +38,17 @@ def _package_of(path: pathlib.Path) -> str:
     return ".".join(parts[:-1])
 
 
-def _imports(path: pathlib.Path) -> "tuple[set, set]":
-    """(third-party roots, internal module paths) imported by one file.
-    Relative imports (level > 0) resolve against the containing package
-    so direction checking sees them."""
-    package = _package_of(path)
+def _roots(path: pathlib.Path) -> set:
+    """Third-party import roots of one file (the ring-direction half of
+    the old analysis is tach's job now)."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    roots, internal = set(), set()
+    roots = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                top = alias.name.split(".")[0]
-                if top == "hcs_sg_iac":
-                    internal.add(alias.name)
-                else:
-                    roots.add(top)
-        elif isinstance(node, ast.ImportFrom):
-            if node.level == 0:
-                mod = node.module or ""
-                if mod.split(".")[0] == "hcs_sg_iac":
-                    internal.add(mod)
-                    internal.update(f"{mod}.{a.name}" for a in node.names)
-                else:
-                    roots.add(mod.split(".")[0])
-            else:  # from . import x / from .m import y
-                base = package.split(".") if package else []
-                if node.level > 1:
-                    base = base[: len(base) - (node.level - 1)]
-                mod = ".".join(
-                    base + (node.module.split(".") if node.module else [])
-                )
-                if mod:
-                    internal.add(mod)
-                internal.update(
-                    f"{mod}.{a.name}" if mod else a.name for a in node.names
-                )
-    return roots, internal
+            roots.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            roots.add((node.module or "").split(".")[0])
+    return roots
 
 
 def _all_files() -> list:
@@ -102,7 +71,7 @@ def _id(p):
 def test_third_party_imports_are_designated(path):
     """Stdlib + hcs_sg_iac everywhere; adapters additionally only their
     registered third-party lib (an unregistered adapter file FAILS)."""
-    roots = _imports(path)[0] - STDLIB - ALLOWED_INTERNAL
+    roots = _roots(path) - STDLIB - ALLOWED_INTERNAL
     allowed = (
         ADAPTER_THIRD_PARTY.get(path.name)
         if path.parent.name == "adapters"

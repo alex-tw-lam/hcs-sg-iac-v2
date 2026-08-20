@@ -78,7 +78,7 @@ _PORT_PAGE = 200
 # cross-checked against the HCS 8.5.1 VPC API Reference (Issue 04 PDF,
 # 585pp): all ten are documented for the private cloud — the v1 paths
 # appear there with {tenant_id} placeholders, which BasicCredentials
-# fills with the project id. tests/adapters/test_huawei_translate.py
+# fills with the project id. tests/test_huawei_translate.py
 # asserts every target exists on VpcClient.
 _METHODS = {
     "ListSecurityGroupsRequest": "list_security_groups",
@@ -206,7 +206,8 @@ class HuaweiGateway:
                 return out
             marker = page[-1].id
 
-    # -- SgReader --
+    # -- reads (inventory is THE seam; per-SG readers
+    # stay for the contract suite's cross-check) --
     def list_security_groups(self) -> list:
         def to_sg(sg):
             self._sg_name_to_id[sg.name] = sg.id
@@ -286,7 +287,7 @@ class HuaweiGateway:
             nics_by_ip=nics_by_ip,
         )
 
-    # -- MembershipReader --
+    # -- membership --
     def find_nics_by_ip(self, ips: list) -> dict:
         # No marker loop here on purpose: each chunk's result set is
         # bounded by construction — the response can only contain ports
@@ -329,7 +330,7 @@ class HuaweiGateway:
             to_nic,
         )
 
-    # -- SgWriter --
+    # -- writers --
     def create_security_group(self, name: str, description: str) -> CloudSg:
         resp = self._run(
             CreateSecurityGroupRequest(
@@ -361,7 +362,6 @@ class HuaweiGateway:
     def delete_security_group(self, sg_id: str) -> None:
         self._run(DeleteSecurityGroupRequest(security_group_id=sg_id))
 
-    # -- SgRuleWriter --
     def create_rule(self, sg_id: str, rule: Rule) -> CloudRule:
         lo, hi = _bounds(rule.ports)
         if hasattr(rule.remote, "name"):

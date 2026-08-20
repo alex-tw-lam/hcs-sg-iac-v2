@@ -1,10 +1,8 @@
 # hcs_sg_iac/usecases/pipeline.py
-"""The orchestration seam (docs/architecture.md): sequences
-load → validate → resolve → snapshot → plan, and for --yes:
-confirm-hook → execute → audit. The loader, confirmation hook and audit
-sink are INJECTED by the presentation layer (the CLI today; a web API or
-GUI tomorrow) — usecases never import adapters, so this module stays
-import-pure."""
+"""The orchestration seam: load → resolve → snapshot → plan, and for
+--yes: execute. The loader is INJECTED by the presentation layer (the
+CLI today; a web API tomorrow) — usecases never import adapters, so
+this module stays import-pure."""
 
 import logging
 
