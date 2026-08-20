@@ -13,26 +13,24 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 
 
 def test_constants_come_from_the_model():
-    gs, rs = (
-        schema_export.group_file_schema(),
-        schema_export.rules_file_schema(),
-    )
+    gs = schema_export.group_file_schema()
     assert gs["properties"]["name"]["pattern"] == GROUP_NAME_RE.pattern
-    assert (
-        rs["properties"]["security_group"]["pattern"] == GROUP_NAME_RE.pattern
-    )
-    ingress_item = rs["properties"]["ingress"]["items"]
-    assert ingress_item["properties"]["protocol"]["enum"] == list(PROTOCOLS)
-    assert ingress_item["required"] == ["source", "protocol"]
-    assert rs["properties"]["egress"]["items"]["required"] == [
-        "destination",
-        "protocol",
-    ]
+    ing = schema_export.direction_file_schema("ingress")
+    eg = schema_export.direction_file_schema("egress")
+    assert ing["items"]["properties"]["protocol"]["enum"] == list(PROTOCOLS)
+    assert ing["items"]["required"] == ["source", "protocol"]
+    assert eg["items"]["required"] == ["destination", "protocol"]
+
+
+def test_direction_files_are_bare_lists():
+    for direction in ("ingress", "egress"):
+        d = schema_export.direction_file_schema(direction)
+        assert d["type"] == "array"
+        assert "ABSENT file" in d["$comment"]
 
 
 def test_icmp_family_forbids_ports_via_if_then():
-    rs = schema_export.rules_file_schema()
-    rule = rs["properties"]["ingress"]["items"]
+    rule = schema_export.direction_file_schema("ingress")["items"]
     cond = rule["allOf"][0]
     assert cond["if"]["properties"]["protocol"]["enum"] == [
         "icmp",
@@ -44,9 +42,9 @@ def test_icmp_family_forbids_ports_via_if_then():
 
 
 def test_ports_accept_string_int_and_list():
-    one_of = schema_export.rules_file_schema()["properties"]["ingress"][
-        "items"
-    ]["properties"]["ports"]["oneOf"]
+    one_of = schema_export.direction_file_schema("ingress")["items"][
+        "properties"
+    ]["ports"]["oneOf"]
     assert "pattern" in [k for o in one_of for k in o]  # grammar string
     assert any(o.get("type") == "integer" for o in one_of)
     assert any(o.get("type") == "array" for o in one_of)
@@ -55,14 +53,13 @@ def test_ports_accept_string_int_and_list():
 def test_committed_copies_match_a_fresh_export():
     for name, which in (
         ("group-file.schema.json", "group"),
-        ("rules-file.schema.json", "rules"),
+        ("ingress-file.schema.json", "ingress"),
+        ("egress-file.schema.json", "egress"),
     ):
-        committed = json.loads((REPO / "schemas" / name).read_text())
-        assert committed == json.loads(schema_export.dumps(which)), name
+        committed = (REPO / "schemas" / name).read_text(encoding="utf-8")
+        assert committed == schema_export.dumps(which) + "\n", name
 
 
-def test_dumps_all_contains_both_keyed():
+def test_dumps_all_contains_keyed_schemas():
     data = json.loads(schema_export.dumps("all"))
-    assert set(data) == {"group_file", "rules_file"}
-    assert data["group_file"]["required"] == ["name"]
-    assert data["rules_file"]["required"] == ["security_group"]
+    assert set(data) == {"group_file", "ingress_file", "egress_file"}

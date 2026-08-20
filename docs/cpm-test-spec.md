@@ -9,7 +9,7 @@ loader/usecase/adapter · **T3** cli-e2e · **T4** cloud-contract
 
 ## 1. Field inventory (atomic units)
 
-### 1.1 `groups/<name>.yaml`
+### 1.1 `security-groups/<name>/` (per-SG directory)
 
 | Field | Atomic choices |
 |---|---|

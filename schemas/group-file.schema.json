@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hcs-sg.local/schemas/group-file.schema.json",
   "title": "hcs-sg group file",
-  "$comment": "groups/<name>.yaml \u2014 the file's name stem must equal `name`; duplicate member IPs within a group are rejected at load time; extra keys in member entries are tolerated (reserved for future nic:/vm: types).",
+  "$comment": "security-groups/<name>/group.yaml \u2014 the directory name must equal `name`; duplicate member IPs within a group are rejected at load time; extra keys in member entries are tolerated (reserved for future nic:/vm: types).",
   "type": "object",
   "required": [
     "name"

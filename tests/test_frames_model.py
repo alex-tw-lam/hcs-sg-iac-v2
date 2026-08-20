@@ -57,13 +57,37 @@ def _check_rules_file(rf: entities.RulesFile, want: dict):
 def test_frame(frame):
     call, raw = frame.model_call, frame.model_input
     if call in ("parse_group", "parse_rules_file"):
+        # "parse_rules_file" rows keep their OLD document shape
+        # ({ingress?, egress?}) — the flat layout died in v0.6.0, so the
+        # consumer translates each section to the REAL per-direction
+        # parser (parse_rule_list). Same semantics, live code path.
         report = Report()
-        parse = (
-            entities.parse_group
-            if call == "parse_group"
-            else entities.parse_rules_file
-        )
-        obj = parse(raw, "where", report)
+        if call == "parse_group":
+            obj = entities.parse_group(raw, "where", report)
+        else:
+            ingress = egress = ()
+            ing_managed = eg_managed = False
+            if "ingress" in raw:
+                ingress = entities.parse_rule_list(
+                    raw["ingress"], "where", report, "ingress", "source"
+                )
+                ing_managed = True
+            if "egress" in raw:
+                egress = entities.parse_rule_list(
+                    raw["egress"], "where", report, "egress", "destination"
+                )
+                eg_managed = True
+            obj = (
+                entities.RulesFile(
+                    security_group=str(raw.get("security_group", "")),
+                    ingress=ingress,
+                    egress=egress,
+                    ingress_managed=ing_managed,
+                    egress_managed=eg_managed,
+                )
+                if report.ok
+                else None
+            )
         if frame.expect_ok:
             assert report.ok, report.errors
             assert obj is not None

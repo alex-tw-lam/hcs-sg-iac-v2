@@ -51,7 +51,7 @@ Filename stem **must** equal the group name inside (`groups/web-tier.yaml`
 contains `name: web-tier`). Renames are therefore delete + create; the tool
 never guesses.
 
-### 2.1 Group file — `groups/<name>.yaml`
+### 2.1 Group file — `security-groups/<name>/group.yaml`
 
 ```yaml
 name: web-tier            # ^[a-z0-9][a-z0-9_-]{0,63}$ (1-64 chars); must not parse as IP/CIDR

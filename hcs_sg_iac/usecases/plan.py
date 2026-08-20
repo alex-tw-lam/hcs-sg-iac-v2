@@ -119,7 +119,8 @@ def plan(
     for sg in snapshot.sgs:
         if sg.name not in state.groups:
             unmanaged.append(
-                f"security group '{sg.name}' " f"(no groups/{sg.name}.yaml)"
+                f"security group '{sg.name}' "
+                f"(no security-groups/{sg.name}/)"
             )
 
     for gname in sorted(state.groups):
