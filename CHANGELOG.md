@@ -2,7 +2,7 @@
 
 Semantic versioning; pre-1.0 minors carry breaking changes.
 
-## Unreleased
+## v0.3.0 — 2026-08-20
 - **Logging made consistent** (contract documented in README): one
   `phase:` verb per command (validate/plan/apply/destroy/snapshot/drift/
   import all log phases now — previously only plan/apply did), the SAME
