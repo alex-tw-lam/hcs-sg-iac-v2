@@ -67,16 +67,20 @@ hooks and renderers, the pipeline is shared.
 
 ## Enforcement
 
-`tests/test_architecture.py` AST-checks every file:
+Two enforcers, one rule each:
 
-- model/ and usecases/ import stdlib + `hcs_sg_iac` only — never PyYAML,
-  never the SDK
-- each adapter file imports exactly its designated third-party root
-  (`yaml_config`→yaml, `huawei_gateway`→huaweicloudsdkcore/vpc, others none);
-  an unregistered adapter file FAILS, so additions are deliberate
-- ring direction: usecases may import model only; adapters may import
-  model plus same-ring adapter modules (`huawei_gateway` uses `ratelimit`)
-  — never usecases or cli; model imports nothing inward of itself
+- **Ring direction** — `tach check` (tach.toml): four ring-level
+  modules (`model`, `usecases`, `adapters`, `cli`); usecases may import
+  model only; adapters may import model plus same-ring adapters
+  (`huawei_gateway` uses `ratelimit`) — never usecases or cli; model
+  imports nothing inward of itself. Sibling imports inside a ring are
+  internal by construction, which is why four modules are enough.
+- **Per-file third-party designation** — `tests/test_architecture.py`
+  AST-checks every file: model/usecases/cli import stdlib + `hcs_sg_iac`
+  only; each adapter file imports exactly its designated third-party
+  root (`yaml_config`→yaml, `huawei_gateway`→huaweicloudsdkcore/vpc,
+  others none). An unregistered adapter file FAILS, so additions are
+  deliberate.
 
 ## The five Protocols (the portability boundary)
 

@@ -1,12 +1,13 @@
 # tests/test_architecture.py
-"""Imports point inward; the inner rings never know the outer ones exist.
+"""Third-party designation: model/, usecases/ and cli/ import stdlib +
+hcs_sg_iac only; adapters/ files import EXACTLY their designated
+third-party lib (an unregistered adapter file FAILS — additions are
+deliberate).
 
-Third-party designation: model/ and usecases/ import stdlib + hcs_sg_iac
-only; cli/ imports stdlib + hcs_sg_iac only; adapters/ files import
-exactly their designated third-party lib.
-
-Ring direction: every internal import of a file must stay within its
-ring's allowed internal prefixes (an unregistered direction FAILS).
+Ring DIRECTION (imports point inward, siblings never see each other) is
+tach's job: tach.toml declares four ring-level modules and
+`tach check` enforces them — keep both sources true to
+docs/architecture.md.
 """
 
 import ast
@@ -31,18 +32,11 @@ ADAPTER_THIRD_PARTY = {
 }
 ALLOWED_INTERNAL = {"hcs_sg_iac"}
 
+
 # Per-ring allowed internal import prefixes (docs/architecture.md):
 # model imports itself; usecases add themselves; adapters add themselves
 # (huawei_gateway imports ratelimit — same ring, allowed); cli, the
 # outermost ring, may import anything in the package.
-RING_ALLOWED_INTERNAL = {
-    "model": {"hcs_sg_iac.model"},
-    "usecases": {"hcs_sg_iac.model", "hcs_sg_iac.usecases"},
-    "adapters": {"hcs_sg_iac.model", "hcs_sg_iac.adapters"},
-    "cli": {"hcs_sg_iac"},
-}
-
-
 def _package_of(path: pathlib.Path) -> str:
     """Containing package of a module file, as a dotted path
     (…/hcs_sg_iac/usecases/x.py -> hcs_sg_iac.usecases)."""
@@ -88,14 +82,6 @@ def _imports(path: pathlib.Path) -> "tuple[set, set]":
     return roots, internal
 
 
-def _outward(internal: set, allowed: set) -> set:
-    return {
-        i
-        for i in internal
-        if not any(i == a or i.startswith(a + ".") for a in allowed)
-    }
-
-
 def _all_files() -> list:
     files = []
     for ring in RINGS:
@@ -129,11 +115,3 @@ def test_third_party_imports_are_designated(path):
     assert (
         roots <= allowed
     ), f"{path.parent.name}/{path.name} imports {roots - allowed}"
-
-
-@pytest.mark.parametrize("path", _ALL, ids=_id)
-def test_imports_stay_within_their_ring(path):
-    _, internal = _imports(path)
-    ring = path.parent.name
-    bad = _outward(internal, RING_ALLOWED_INTERNAL[ring])
-    assert not bad, f"{ring}/{path.name} imports outward of its ring: {bad}"
