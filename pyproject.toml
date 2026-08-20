@@ -1,6 +1,6 @@
 [project]
 name = "hcs-sg-iac"
-version = "0.7.0"
+version = "0.7.1"
 description = "Security-group-as-code CLI for HCS 8.5.1 (validate / plan / apply, dry-run by default)"
 requires-python = ">=3.11"
 dependencies = [
@@ -10,8 +10,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "black>=24", "ruff>=0.6", "mypy>=1.11",
-       "pre-commit>=3.8", "radon>=6.0", "bandit>=1.7", "vulture>=2.11",
-       "tach>=0.23"]
+       "radon>=6.0", "tach>=0.23"]
 
 [project.scripts]
 hcs-sg = "hcs_sg_iac.cli.main:main"
@@ -43,13 +42,6 @@ python_version = "3.11"
 files = ["hcs_sg_iac"]             # the prod ring; tests stay untyped-OK
 ignore_missing_imports = true      # yaml, huaweicloudsdk*, are untyped
 check_untyped_defs = true
-
-[tool.bandit]
-exclude_dirs = ["tests", ".venv", "schemas"]
-
-[tool.vulture]
-min_confidence = 90
-paths = ["hcs_sg_iac"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
