@@ -92,20 +92,15 @@ def _cloud_rule_detail(cr: CloudRule, id_to_name: dict) -> str:
     return _fmt_rule_detail(direction, protocol, ports, remote)
 
 
-def plan(
-    state: DesiredState, resolution: Resolution, snapshot: Snapshot
-) -> ActionList:
-    actions: list = []
-    unmanaged: list = []
-    clears: list = []  # managed+code-empty directions we strip
-    id_to_name = {sg.id: sg.name for sg in snapshot.sgs}
+def _name_to_sg(snapshot: Snapshot) -> dict:
+    """cloud name -> CloudSg; raises (with EVERY duplicate name and id
+    enumerated) when the cloud holds a duplicated name — reporting only
+    the first pair found would hide the rest of the cleanup work."""
     by_name: dict = {}
     for sg in snapshot.sgs:
         by_name.setdefault(sg.name, []).append(sg)
-    dupes = {name: sgs for name, sgs in by_name.items() if len(sgs) > 1}
+    dupes = {n: sgs for n, sgs in by_name.items() if len(sgs) > 1}
     if dupes:
-        # Enumerate EVERY duplicated name with EVERY id — reporting only
-        # the first pair found hides the rest of the cleanup work.
         raise ValueError(
             "duplicate cloud security group name(s) — rename in the cloud "
             "before planning: "
@@ -114,7 +109,195 @@ def plan(
                 for name, sgs in sorted(dupes.items())
             )
         )
-    name_to_sg = {sg.name: sg for sg in snapshot.sgs}
+    return {sg.name: sg for sg in snapshot.sgs}
+
+
+def _plan_group_row(gname, group, cloud_sg, actions):
+    """The group's own row: create when absent, update on description
+    drift."""
+    if cloud_sg is None:
+        actions.append(
+            Action(
+                "+",
+                "group",
+                gname,
+                f"description: {_q(group.description)}",
+                op=CreateSg(description=group.description),
+            )
+        )
+    elif group.description != cloud_sg.description:
+        actions.append(
+            Action(
+                "~",
+                "group",
+                gname,
+                f"description: {_q(cloud_sg.description)} -> "
+                f"{_q(group.description)}",
+                cloud_id=cloud_sg.id,
+                op=UpdateSg(sg_id=cloud_sg.id, description=group.description),
+            )
+        )
+
+
+def _plan_members(gname, group, cloud_sg, snapshot, resolution, actions):
+    """Membership: the IP list is the truth (missing -> attach, extra ->
+    detach)."""
+    desired_ips = {m.ip for m in group.members}
+    attached_ips = (
+        {n.ip for n in snapshot.attached[cloud_sg.id]} if cloud_sg else set()
+    )
+    for m in group.members:
+        if cloud_sg and m.ip in attached_ips:
+            continue
+        nic = resolution.nics.get(m.ip)
+        if nic is None:  # proven unreachable when resolution passed,
+            raise ValueError(  # but a raise survives `python -O`
+                f"ip {m.ip} did not resolve — resolution.report must "
+                f"be ok before plan()"
+            )
+        detail = f"ip {m.ip}" + (f" (vm={nic.vm_name})" if nic.vm_name else "")
+        actions.append(
+            Action(
+                "+",
+                "member",
+                gname,
+                detail,
+                cloud_id=nic.port_id,
+                op=AttachNic(
+                    sg_id=cloud_sg.id if cloud_sg else "",
+                    port_id=nic.port_id,
+                ),
+            )
+        )
+    if not cloud_sg:
+        return
+    for n in snapshot.attached[cloud_sg.id]:
+        if n.ip not in desired_ips:
+            actions.append(
+                Action(
+                    "-",
+                    "member",
+                    gname,
+                    f"ip {n.ip or n.port_id}",
+                    cloud_id=n.port_id,
+                    op=DetachNic(sg_id=cloud_sg.id, port_id=n.port_id),
+                )
+            )
+
+
+def _plan_managed_direction(
+    gname, cloud_sg, direction, wanted, snapshot, id_to_name, actions, clears
+):
+    """One MANAGED direction: create what code wants and the cloud
+    lacks; delete what the cloud has and code does not (self-referential
+    cloud rules are never stale — see _plan_rules)."""
+    cloud_now = [
+        r
+        for r in (snapshot.rules.get(cloud_sg.id, []) if cloud_sg else [])
+        if r.direction == direction
+    ]
+    own_id = cloud_sg.id if cloud_sg else None
+    subs = list(
+        {s.identity(): s for r in wanted for s in _sub_rules(r)}.values()
+    )
+    wanted_ids = {s.identity() for s in subs}
+    cloud_ids = {r.identity(id_to_name) for r in cloud_now}
+    for s in subs:
+        if s.identity() not in cloud_ids:
+            actions.append(
+                Action(
+                    "+",
+                    "rule",
+                    gname,
+                    _rule_detail(s),
+                    cloud_id=None,
+                    op=CreateRule(
+                        sg_id=cloud_sg.id if cloud_sg else "", rule=s
+                    ),
+                )
+            )
+    stale = [
+        cr
+        for cr in cloud_now
+        if cr.identity(id_to_name) not in wanted_ids
+        and cr.remote_group_id != own_id
+    ]
+    for cr in stale:
+        actions.append(
+            Action(
+                "-",
+                "rule",
+                gname,
+                _cloud_rule_detail(cr, id_to_name),
+                cloud_id=cr.id,
+                op=DeleteRule(rule_id=cr.id),
+            )
+        )
+    # A managed direction with an empty code list strips every cloud
+    # rule except the preserved self rules: that fact travels as data
+    # (clears), so the clear-all warning never parses display strings.
+    # Only when stale is non-empty — a []-direction with nothing (or
+    # only self rules) to delete must not raise a false alarm.
+    if not wanted and stale:
+        clears.append(f"{direction} rules of {gname}")
+
+
+def _plan_rules(
+    gname, cloud_sg, rf, snapshot, id_to_name, actions, unmanaged, clears
+):
+    """Rules per direction. An UNMANAGED direction (no rules file for
+    the group, or the direction file absent) never touches the cloud
+    side — its cloud rules are only inventoried into `unmanaged`.
+    HCS auto-adds self-referential rules on SG create (allow within the
+    SG: remote_group_id = the SG's own id): they stay visible so a
+    CODED self-reference still matches them, but they are never stale —
+    convergence must not strip the cloud's own defaults, not even for a
+    managed [] direction."""
+    directions = (
+        (
+            ("ingress", rf.ingress_managed, rf.ingress),
+            ("egress", rf.egress_managed, rf.egress),
+        )
+        if rf is not None
+        else (
+            ("ingress", False, ()),
+            ("egress", False, ()),
+        )
+    )
+    for direction, managed, wanted in directions:
+        if not managed:
+            if cloud_sg and snapshot.rules.get(cloud_sg.id):
+                n = sum(
+                    1
+                    for r in snapshot.rules[cloud_sg.id]
+                    if r.direction == direction
+                )
+                if n:
+                    unmanaged.append(
+                        f"{direction} rules of {gname} "
+                        f"({n} cloud rules untouched)"
+                    )
+            continue
+        _plan_managed_direction(
+            gname,
+            cloud_sg,
+            direction,
+            wanted,
+            snapshot,
+            id_to_name,
+            actions,
+            clears,
+        )
+
+
+def plan(
+    state: DesiredState, resolution: Resolution, snapshot: Snapshot
+) -> ActionList:
+    actions: list = []
+    unmanaged: list = []
+    clears: list = []  # managed+code-empty directions we strip
+    id_to_name = {sg.id: sg.name for sg in snapshot.sgs}
+    name_to_sg = _name_to_sg(snapshot)
 
     for sg in snapshot.sgs:
         if sg.name not in state.groups:
@@ -125,166 +308,19 @@ def plan(
 
     for gname in sorted(state.groups):
         group = state.groups[gname]
-        rf = state.rules.get(gname)
         cloud_sg = name_to_sg.get(gname)
-
-        if cloud_sg is None:
-            actions.append(
-                Action(
-                    "+",
-                    "group",
-                    gname,
-                    f"description: {_q(group.description)}",
-                    op=CreateSg(description=group.description),
-                )
-            )
-        else:
-            if group.description != cloud_sg.description:
-                actions.append(
-                    Action(
-                        "~",
-                        "group",
-                        gname,
-                        f"description: {_q(cloud_sg.description)} -> "
-                        f"{_q(group.description)}",
-                        cloud_id=cloud_sg.id,
-                        op=UpdateSg(
-                            sg_id=cloud_sg.id, description=group.description
-                        ),
-                    )
-                )
-
-        # ---- membership: the IP list is the truth ----
-        desired_ips = {m.ip for m in group.members}
-        attached_ips = (
-            {n.ip for n in snapshot.attached[cloud_sg.id]}
-            if cloud_sg
-            else set()
+        _plan_group_row(gname, group, cloud_sg, actions)
+        _plan_members(gname, group, cloud_sg, snapshot, resolution, actions)
+        _plan_rules(
+            gname,
+            cloud_sg,
+            state.rules.get(gname),
+            snapshot,
+            id_to_name,
+            actions,
+            unmanaged,
+            clears,
         )
-        for m in group.members:
-            if cloud_sg and m.ip in attached_ips:
-                continue
-            nic = resolution.nics.get(m.ip)
-            if nic is None:  # proven unreachable when resolution passed,
-                raise ValueError(  # but a raise survives `python -O`
-                    f"ip {m.ip} did not resolve — resolution.report must "
-                    f"be ok before plan()"
-                )
-            detail = f"ip {m.ip}" + (
-                f" (vm={nic.vm_name})" if nic.vm_name else ""
-            )
-            actions.append(
-                Action(
-                    "+",
-                    "member",
-                    gname,
-                    detail,
-                    cloud_id=nic.port_id,
-                    op=AttachNic(
-                        sg_id=cloud_sg.id if cloud_sg else "",
-                        port_id=nic.port_id,
-                    ),
-                )
-            )
-
-        if cloud_sg:
-            for n in snapshot.attached[cloud_sg.id]:
-                if n.ip not in desired_ips:
-                    actions.append(
-                        Action(
-                            "-",
-                            "member",
-                            gname,
-                            f"ip {n.ip or n.port_id}",
-                            cloud_id=n.port_id,
-                            op=DetachNic(sg_id=cloud_sg.id, port_id=n.port_id),
-                        )
-                    )
-
-        # ---- rules per managed direction ----
-        # No rules file for the group: BOTH directions are unmanaged
-        # (docs/design-spec.md §2.3).
-        if rf is not None:
-            directions = (
-                ("ingress", rf.ingress_managed, rf.ingress),
-                ("egress", rf.egress_managed, rf.egress),
-            )
-        else:
-            directions = (("ingress", False, ()), ("egress", False, ()))
-        for direction, managed, wanted in directions:
-            if not managed:
-                if cloud_sg and snapshot.rules.get(cloud_sg.id):
-                    n = sum(
-                        1
-                        for r in snapshot.rules[cloud_sg.id]
-                        if r.direction == direction
-                    )
-                    if n:
-                        unmanaged.append(
-                            f"{direction} rules of {gname} "
-                            f"({n} cloud rules untouched)"
-                        )
-                continue
-            cloud_now = [
-                r
-                for r in (
-                    snapshot.rules.get(cloud_sg.id, []) if cloud_sg else []
-                )
-                if r.direction == direction
-            ]
-            own_id = cloud_sg.id if cloud_sg else None
-            subs = list(
-                {
-                    s.identity(): s for r in wanted for s in _sub_rules(r)
-                }.values()
-            )
-            wanted_ids = {s.identity() for s in subs}
-            cloud_ids = {r.identity(id_to_name) for r in cloud_now}
-            for s in subs:
-                if s.identity() not in cloud_ids:
-                    actions.append(
-                        Action(
-                            "+",
-                            "rule",
-                            gname,
-                            _rule_detail(s),
-                            cloud_id=None,
-                            op=CreateRule(
-                                sg_id=cloud_sg.id if cloud_sg else "", rule=s
-                            ),
-                        )
-                    )
-            # HCS auto-adds self-referential rules on SG create (allow
-            # within the SG: remote_group_id = the SG's own id). They
-            # stay in cloud_now so a CODED self-reference still matches
-            # them (no duplicate create), but they are never stale —
-            # convergence must not strip the cloud's own defaults, not
-            # even for a managed [] direction.
-            stale = [
-                cr
-                for cr in cloud_now
-                if cr.identity(id_to_name) not in wanted_ids
-                and cr.remote_group_id != own_id
-            ]
-            for cr in stale:
-                actions.append(
-                    Action(
-                        "-",
-                        "rule",
-                        gname,
-                        _cloud_rule_detail(cr, id_to_name),
-                        cloud_id=cr.id,
-                        op=DeleteRule(rule_id=cr.id),
-                    )
-                )
-            # A managed direction with an empty code list strips every
-            # cloud rule except the preserved self rules: that fact
-            # travels as data (clears), so the clear-all warning never
-            # parses display strings. Only when stale is non-empty — a
-            # []-direction with nothing (or only self rules) to delete
-            # must not raise a false alarm.
-            if not wanted and stale:
-                clears.append(f"{direction} rules of {gname}")
 
     return ActionList(
         actions=tuple(actions),

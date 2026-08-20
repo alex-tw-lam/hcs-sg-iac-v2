@@ -76,6 +76,30 @@ def _record(
     log("action %s: %s %s %s", status, action.sign, action.type, action.group)
 
 
+def _perform(op, action, *, sg_writer, rule_writer, binder, resolve_sg_id):
+    """Dispatch ONE payload to its writer call (the op type picks the
+    writer; resolve_sg_id substitutes ids of SGs created earlier in this
+    run). Returns the created sg id for CreateSg, else None."""
+    if isinstance(op, CreateSg):
+        sg = sg_writer.create_security_group(action.group, op.description)
+        return sg.id
+    if isinstance(op, UpdateSg):
+        sg_writer.update_security_group_description(op.sg_id, op.description)
+    elif isinstance(op, DeleteSg):
+        sg_writer.delete_security_group(op.sg_id)
+    elif isinstance(op, CreateRule):
+        rule_writer.create_rule(resolve_sg_id(action.group, op.sg_id), op.rule)
+    elif isinstance(op, DeleteRule):
+        rule_writer.delete_rule(op.rule_id)
+    elif isinstance(op, AttachNic):
+        binder.attach_nic(resolve_sg_id(action.group, op.sg_id), op.port_id)
+    elif isinstance(op, DetachNic):
+        binder.detach_nic(resolve_sg_id(action.group, op.sg_id), op.port_id)
+    else:  # unreachable by construction
+        raise RuntimeError(f"unknown payload {type(op).__name__}")
+    return None
+
+
 def execute(
     action_list: ActionList,
     *,
@@ -136,33 +160,16 @@ def execute(
         )
         while True:
             try:
-                if isinstance(op, CreateSg):
-                    sg = sg_writer.create_security_group(
-                        action.group, op.description
-                    )
-                    created_sg_ids[action.group] = sg.id
-                elif isinstance(op, UpdateSg):
-                    sg_writer.update_security_group_description(
-                        op.sg_id, op.description
-                    )
-                elif isinstance(op, DeleteSg):
-                    sg_writer.delete_security_group(op.sg_id)
-                elif isinstance(op, CreateRule):
-                    rule_writer.create_rule(
-                        resolve_sg_id(action.group, op.sg_id), op.rule
-                    )
-                elif isinstance(op, DeleteRule):
-                    rule_writer.delete_rule(op.rule_id)
-                elif isinstance(op, AttachNic):
-                    binder.attach_nic(
-                        resolve_sg_id(action.group, op.sg_id), op.port_id
-                    )
-                elif isinstance(op, DetachNic):
-                    binder.detach_nic(
-                        resolve_sg_id(action.group, op.sg_id), op.port_id
-                    )
-                else:  # unreachable by construction
-                    raise RuntimeError(f"unknown payload {type(op).__name__}")
+                new_sg_id = _perform(
+                    op,
+                    action,
+                    sg_writer=sg_writer,
+                    rule_writer=rule_writer,
+                    binder=binder,
+                    resolve_sg_id=resolve_sg_id,
+                )
+                if new_sg_id:
+                    created_sg_ids[action.group] = new_sg_id
                 _record(results, action, "ok")
                 break
             except (QuotaExhausted, CloudThrottled) as e:
