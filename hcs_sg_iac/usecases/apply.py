@@ -48,8 +48,9 @@ def _record(results: list, action, status: str, error=None) -> None:
     """Append one result and log it (--verbose): the run is visible
     action-by-action instead of only via the end-of-run table."""
     results.append(ActionResult(action, status, error))
-    _log.info("action %s: %s %s %s", status, action.sign, action.type,
-              action.group)
+    log = _log.info if status == "ok" else _log.warning
+    log("action %s: %s %s %s", status, action.sign, action.type,
+        action.group)
 
 
 def execute(action_list: ActionList, *, sg_writer, rule_writer, binder,

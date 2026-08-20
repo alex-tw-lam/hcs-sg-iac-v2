@@ -35,12 +35,11 @@ def plan_project(load_project, gateway, project, *,
     waits = 0
     while True:
         try:
-            _log.info("resolving %d member IPs",
+            _log.info("phase: resolving %d member IPs",
                       sum(len(g.members) for g in state.groups.values()))
             resolution = resolve.resolve_memberships(gateway, state)
             if not resolution.report.ok:
                 return None, list(resolution.report.errors)
-            _log.info("reading cloud snapshot")
             snapshot = plan_uc.read_snapshot(gateway, gateway)
             return plan_uc.plan(state, resolution, snapshot), []
         except ValueError as e:                     # duplicate cloud SG names etc.
@@ -83,7 +82,7 @@ def execute_confirmed(gateway, al: ActionList, *, prompt: str, expect: str,
     one ActionResult per action, or None when confirmation declined."""
     if not confirm(prompt, expect):
         return None
-    _log.info("confirmed — executing %d actions",
+    _log.info("phase: executing %d confirmed actions",
               sum(1 for a in al.actions if a.op is not None))
     return apply_uc.execute(al, sg_writer=gateway, rule_writer=gateway,
                             binder=gateway, audit=audit(),

@@ -105,3 +105,18 @@ def test_schema_command_outputs_json_no_gateway(capsys):
             assert set(data) == set(keys)
         else:
             assert data["$schema"].startswith("https://json-schema.org/")
+
+
+def test_verbose_wiring_is_idempotent_across_runs(project, capsys):
+    """Two --verbose runs in ONE process (embedders, test runners) must
+    not duplicate log lines: _configure_logging guards its handler."""
+    gw = FakeGateway()
+    gw.add_nic(CloudNic(port_id="p1", ip="10.0.1.10"))
+    argv = ["plan", "--project", str(project), "--verbose"]
+    main(argv, gateway=gw)
+    first = capsys.readouterr().err
+    main(argv, gateway=gw)
+    second = capsys.readouterr().err
+    n1 = first.count("hcs-sg: phase:")
+    n2 = second.count("hcs-sg: phase:")
+    assert n1 and n1 == n2, (n1, n2)

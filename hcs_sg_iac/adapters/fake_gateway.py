@@ -19,8 +19,9 @@ class FakeGateway:
         self.call_log: list = []
         self._next = 0
         self.budget: "int | None" = None    # None = unlimited
+        self._calls = 0                     # every protocol call (log line)
 
-    # -- seeding (test/contract scaffolding, not part of protocols) --
+    # seeding (test/contract scaffolding, not part of protocols) --
     def add_sg(self, sg: CloudSg) -> CloudSg:
         self._sgs[sg.id] = sg
         return sg
@@ -37,42 +38,56 @@ class FakeGateway:
         self._next += 1
         return f"id-{self._next:04d}"
 
+    def _trace(self, what: str) -> None:
+        """Emit the SAME per-call line the real gateway emits — template
+        parity is what makes --verbose output readable across fake and
+        real (contract suite runs both)."""
+        self._calls += 1
+        limit = self.budget if self.budget is not None else "unlimited"
+        _log.info("gateway call %s (%s/%s this window, %.0f ms)",
+                  what, self._calls, limit, 0.0)
+
     def _spend(self, what: str):
         self.call_log.append(what)
-        _log.info("gateway call %s", what)
         if self.budget is not None and len(self.call_log) > self.budget:
             raise QuotaExhausted(f"fake budget exhausted ({self.budget} calls)")
 
     # -- SgReader --
     def list_security_groups(self) -> list:
-        _log.info("gateway call list_security_groups")
-        return list(self._sgs.values())
+        sgs = list(self._sgs.values())
+        self._trace("list_security_groups")
+        return sgs
 
     def list_rules(self, sg_id: str) -> list:
-        _log.info("gateway call list_rules")
-        return [r for r in self._rules.values() if r.sg_id == sg_id]
+        rules = [r for r in self._rules.values() if r.sg_id == sg_id]
+        self._trace("list_rules")
+        return rules
 
     # -- MembershipReader --
     def find_nics_by_ip(self, ips: list) -> dict:
-        _log.info("gateway call find_nics_by_ip")
-        return {ip: [n for n in self._nics if n.ip == ip] for ip in ips}
+        found = {ip: [n for n in self._nics if n.ip == ip] for ip in ips}
+        self._trace("find_nics_by_ip")
+        return found
 
     def list_attached_nics(self, sg_id: str) -> list:
-        _log.info("gateway call list_attached_nics")
-        return [n for n in self._nics if (sg_id, n.port_id) in self._attached]
+        nics = [n for n in self._nics
+                if (sg_id, n.port_id) in self._attached]
+        self._trace("list_attached_nics")
+        return nics
 
     def inventory(self) -> "tuple[Snapshot, dict]":
         """In-memory fast path — parity with HuaweiGateway.inventory so
         the contract suite cross-checks the same seam on both."""
-        _log.info("gateway call inventory")
         rules = {sg.id: [r for r in self._rules.values()
                          if r.sg_id == sg.id]
                  for sg in self._sgs.values()}
-        attached = {sg.id: self.list_attached_nics(sg.id)
-                    for sg in self._sgs.values()}
+        attached = {sg.id: [n for n in self._nics
+                            if (sg.id, n.port_id) in self._attached]
+                    for sg in self._sgs.values()}   # inlined: one trace, not N+1
         nics: dict = {}
         for n in self._nics:
             nics.setdefault(n.ip, []).append(n)
+        self._trace("inventory")
         return (Snapshot(sgs=tuple(self._sgs.values()), rules=rules,
                          attached=attached), nics)
 
@@ -81,6 +96,7 @@ class FakeGateway:
         self._spend(f"create_sg:{name}")
         sg = CloudSg(id=self._id(), name=name, description=description)
         self._sgs[sg.id] = sg
+        self._trace(f"create_sg:{name}")
         return sg
 
     def update_security_group_description(self, sg_id: str,
@@ -89,6 +105,7 @@ class FakeGateway:
         old = self._sgs[sg_id]
         self._sgs[sg_id] = CloudSg(id=old.id, name=old.name,
                                    description=description)
+        self._trace(f"update_sg:{sg_id}")
 
     def delete_security_group(self, sg_id: str) -> None:
         self._spend(f"delete_sg:{sg_id}")
@@ -96,6 +113,7 @@ class FakeGateway:
         self._rules = {rid: r for rid, r in self._rules.items()
                        if r.sg_id != sg_id}
         self._attached = {(s, p) for s, p in self._attached if s != sg_id}
+        self._trace(f"delete_sg:{sg_id}")
 
     # -- SgRuleWriter --
     def create_rule(self, sg_id: str, rule) -> CloudRule:
@@ -115,11 +133,13 @@ class FakeGateway:
                        remote_group_id=remote_group_id,
                        remote_ip_prefix=remote_ip_prefix)
         self._rules[cr.id] = cr
+        self._trace(f"create_rule:{sg_id}")
         return cr
 
     def delete_rule(self, rule_id: str) -> None:
         self._spend(f"delete_rule:{rule_id}")
         self._rules.pop(rule_id)
+        self._trace(f"delete_rule:{rule_id}")
 
     # -- NicBinder --
     def attach_nic(self, sg_id: str, port_id: str) -> None:
@@ -127,10 +147,12 @@ class FakeGateway:
         if port_id not in {n.port_id for n in self._nics}:
             self._nics.append(CloudNic(port_id=port_id, ip=""))
         self._attached.add((sg_id, port_id))
+        self._trace(f"attach:{port_id}->{sg_id}")
 
     def detach_nic(self, sg_id: str, port_id: str) -> None:
         self._spend(f"detach:{port_id}->{sg_id}")
         self._attached.discard((sg_id, port_id))
+        self._trace(f"detach:{port_id}->{sg_id}")
 
     # quota display helper used by the CLI (duck-typed, not a protocol)
     def quota_snapshot(self) -> dict:
