@@ -209,7 +209,7 @@ validate`/`plan`, not expressible in a per-file schema.
 
 ## Lint, format, types, checks
 
-Seven gates, all configured in pyproject.toml (black line-length 79 —
+Eight gates (black line-length 79 —
 the house style; ruff replaces flake8+isort+pyupgrade; mypy checks the
 prod ring only; bandit security-scans it; vulture hunts dead code at
 min-confidence 90; radon is enforced by a ratchet test):
@@ -221,12 +221,16 @@ min-confidence 90; radon is enforced by a ratchet test):
     .venv/bin/python -m vulture            # dead code (conf >= 90)
     .venv/bin/radon cc hcs_sg_iac -n C -s  # complexity report (worst blocks)
     .venv/bin/radon mi hcs_sg_iac -s       # maintainability report
+    .venv/bin/tach check                  # ring direction (tach.toml)
     .venv/bin/python -m pytest -q          # behaviour + the radon ratchet
 
-The radon ratchet (tests/test_metrics.py): every file keeps
-maintainability rank A, and the D/F complexity club — cli main(),
-plan(), parse_ports, apply.execute, import_snapshot, render_plan — may
-not gain new members.
+Architecture is split-brain by design, each tool one job: tach.toml
+owns ring DIRECTION (four ring-level modules — sibling imports inside a
+ring are internal by construction); tests/test_architecture.py owns
+per-FILE third-party designation (the registry an unregistered adapter
+file fails against). The radon ratchet (tests/test_metrics.py): every
+file keeps maintainability rank A, and the D/F complexity club may not
+gain new members.
 
 `pre-commit` wiring lives in .pre-commit-config.yaml, but it clones hook
 envs over HTTPS — on the air-gapped RHEL box run the four commands above
