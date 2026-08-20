@@ -3,6 +3,15 @@
 Semantic versioning; pre-1.0 minors carry breaking changes.
 
 ## Unreleased
+- **Logging made consistent** (contract documented in README): one
+  `phase:` verb per command (validate/plan/apply/destroy/snapshot/drift/
+  import all log phases now — previously only plan/apply did), the SAME
+  `gateway call <method> (<used>/<limit> this window, <ms> ms)` template
+  in the fake and the real gateway, per-action severity (failed/
+  throttled actions log at WARNING), and every always-on stderr notice
+  carries the `hcs-sg: ` prefix (the post-write staleness note included).
+  FakeGateway.inventory() no longer emits N+1 call lines (attached
+  membership inlined); its call_log semantics are unchanged.
 - **New: `hcs-sg import` — reverse import / adopt the estate.**
   Generates `groups/*.yaml` + `rules/*.yaml` from a snapshot (default
   `snapshot.json`; offline, zero cloud calls, no credentials). Refuses

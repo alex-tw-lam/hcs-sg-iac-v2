@@ -117,6 +117,27 @@ cloud first if you want to keep it. The property is pinned by test:
 import → write → load → plan converges with zero actions on a
 representable cloud.
 
+## Logging
+
+One voice, three verbs, two streams — the same shape on the fake
+(tests) and the real gateway:
+
+- **`phase: <what>`** — command progress (`phase: reading cloud
+  snapshot`, `phase: importing from snapshot.json`, ...). Every command
+  emits at least one.
+- **`gateway call <method> (<used>/<limit> this window, <ms> ms)`** —
+  one line per cloud call, emitted by BOTH gateways with the same
+  template (the fake reports `0 ms` / `unlimited` where it cannot know).
+- **`action <status>: <sign> <type> <group>`** — per write result.
+
+Levels: `INFO` for progress; `WARNING` for throttles, near-exhausted
+budget and failed/throttled actions. Streams: stdout carries command
+results only (pure JSON under `--json`); everything else — logs,
+wait-and-continue notices, staleness notes — goes to stderr with the
+`hcs-sg: ` prefix. Logs appear with `--verbose` (a stderr handler on
+the `hcs_sg_iac` logger tree); the wait notices and notes print always,
+so an unattended run is never silent about why it is blocked.
+
 ## JSON Schema
 
 Editor/validation schemas for the config files, generated from the model

@@ -23,6 +23,8 @@ from hcs_sg_iac.usecases import drift as drift_uc
 from hcs_sg_iac.usecases import importer, pipeline, schema_export, validate
 from hcs_sg_iac.usecases.plan import read_snapshot
 
+_log = logging.getLogger("hcs_sg_iac.cli")   # --verbose: wired below
+
 
 @dataclass(frozen=True)
 class Config:
@@ -139,9 +141,17 @@ def build_parser() -> argparse.ArgumentParser:
 def _configure_logging() -> None:
     """--verbose: per-call/phase/action progress to stderr; stdout stays
     pure (JSON-safe). Without the flag no handler exists, so INFO records
-    go nowhere. Handler binds sys.stderr at call time (test-friendly)."""
+    go nowhere. Handler binds sys.stderr at call time (test-friendly) and
+    wiring twice in one process adds no duplicate lines (embedders and
+    test runners call main() repeatedly)."""
     log = logging.getLogger("hcs_sg_iac")
+    ours = next((h for h in log.handlers
+                 if getattr(h, "_hcs_sg_handler", False)), None)
+    if ours is not None:
+        ours.stream = sys.stderr    # rebind: capture swaps sys.stderr per test
+        return
     handler = logging.StreamHandler(sys.stderr)
+    handler._hcs_sg_handler = True
     handler.setFormatter(logging.Formatter("hcs-sg: %(message)s"))
     log.addHandler(handler)
     log.setLevel(logging.INFO)
@@ -193,7 +203,7 @@ def _snapshot_stale_note(snap_arg) -> None:
     point-in-time artifact, not a hidden state file (the repo's
     no-state-file rule); refresh or verify explicitly."""
     if snap_arg:
-        print(f"note: {snap_arg} is now stale (writes applied) — "
+        print(f"hcs-sg: note: {snap_arg} is now stale (writes applied) — "
               f"refresh with 'hcs-sg snapshot' or verify with "
               f"'hcs-sg drift --snapshot {snap_arg}'",
               file=sys.stderr)
@@ -233,6 +243,7 @@ def main(argv=None, gateway=None) -> int:
         return 0
 
     if args.command == "validate":
+        _log.info("phase: validating the project")
         state, report = yaml_config.load_project(project)
         if state is not None:
             report = validate.validate_state(state)
@@ -258,6 +269,7 @@ def main(argv=None, gateway=None) -> int:
             print("error: import needs a snapshot — run 'hcs-sg snapshot' "
                   "or pass --snapshot FILE", file=sys.stderr)
             return 1
+        _log.info("phase: importing from %s", src)
         imported = importer.import_snapshot(
             snapshot_from_json(src.read_text(encoding="utf-8"))[0])
         writes = {f"groups/{n}.yaml": yaml_config.dump_group(g)
@@ -270,6 +282,7 @@ def main(argv=None, gateway=None) -> int:
             print("error: refusing to overwrite existing file(s) without "
                   f"--force: {', '.join(clashes)}", file=sys.stderr)
             return 1
+        _log.info("phase: writing %d files", len(writes))
         for rel, text in sorted(writes.items()):
             p_ = project / rel
             p_.parent.mkdir(parents=True, exist_ok=True)
@@ -333,6 +346,7 @@ def main(argv=None, gateway=None) -> int:
     # never a traceback.
     try:
         if args.command == "drift":
+            _log.info("phase: diffing %s against the live cloud", snap_file)
             if snap_file is None:
                 print("error: drift needs a snapshot — run 'hcs-sg "
                       "snapshot' or pass --snapshot FILE", file=sys.stderr)
@@ -363,6 +377,7 @@ def main(argv=None, gateway=None) -> int:
             return 0
 
         if args.command == "snapshot":
+            _log.info("phase: snapshotting the cloud")
             state, report = yaml_config.load_project(project)
             if state is None:
                 print("\n".join(report.errors), file=sys.stderr)

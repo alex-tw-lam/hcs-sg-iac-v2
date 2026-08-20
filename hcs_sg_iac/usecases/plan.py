@@ -29,12 +29,13 @@ def read_snapshot(sg_reader, membership_reader) -> Snapshot:
     able to fetch SGs-with-embedded-rules + ports in one pass expose
     inventory(); the per-SG loop below is the protocol-level fallback
     (fake gateway, any future adapter)."""
+    _log.info("phase: reading cloud snapshot")
     if hasattr(sg_reader, "inventory"):
         return sg_reader.inventory()[0]
     sgs = tuple(sg_reader.list_security_groups())
     rules, attached = {}, {}
     for sg in sgs:
-        _log.info("reading rules for %s (%s)", sg.name, sg.id)
+        _log.info("phase: reading rules for %s (%s)", sg.name, sg.id)
         rules[sg.id] = list(sg_reader.list_rules(sg.id))
         attached[sg.id] = list(membership_reader.list_attached_nics(sg.id))
     return Snapshot(sgs=sgs, rules=rules, attached=attached)
