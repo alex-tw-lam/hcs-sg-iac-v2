@@ -165,11 +165,11 @@ def plan(
             if cloud_sg and m.ip in attached_ips:
                 continue
             nic = resolution.nics.get(m.ip)
-            assert nic is not None, (
-                f"ip {m.ip} did not resolve — "
-                f"resolution.report must be ok "
-                f"before plan()"
-            )
+            if nic is None:  # proven unreachable when resolution passed,
+                raise ValueError(  # but a raise survives `python -O`
+                    f"ip {m.ip} did not resolve — resolution.report must "
+                    f"be ok before plan()"
+                )
             detail = f"ip {m.ip}" + (
                 f" (vm={nic.vm_name})" if nic.vm_name else ""
             )
