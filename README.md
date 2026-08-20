@@ -207,16 +207,26 @@ validate`/`plan`, not expressible in a per-file schema.
 - Whole-group deletion only via explicit `destroy` (typed-name
   confirmation). Removing a file just unmanages the group.
 
-## Lint, format, types
+## Lint, format, types, checks
 
-Four gates, all configured in pyproject.toml (black line-length 79 —
+Seven gates, all configured in pyproject.toml (black line-length 79 —
 the house style; ruff replaces flake8+isort+pyupgrade; mypy checks the
-prod ring only):
+prod ring only; bandit security-scans it; vulture hunts dead code at
+min-confidence 90; radon is enforced by a ratchet test):
 
     .venv/bin/python -m black .            # format
     .venv/bin/python -m ruff check .       # lint (E/W/F/I/UP/B/SIM/C4/RUF)
     .venv/bin/python -m mypy               # types (hcs_sg_iac only)
-    .venv/bin/python -m pytest -q          # behaviour
+    .venv/bin/python -m bandit -q -r hcs_sg_iac   # security
+    .venv/bin/python -m vulture            # dead code (conf >= 90)
+    .venv/bin/radon cc hcs_sg_iac -n C -s  # complexity report (worst blocks)
+    .venv/bin/radon mi hcs_sg_iac -s       # maintainability report
+    .venv/bin/python -m pytest -q          # behaviour + the radon ratchet
+
+The radon ratchet (tests/test_metrics.py): every file keeps
+maintainability rank A, and the D/F complexity club — cli main(),
+plan(), parse_ports, apply.execute, import_snapshot, render_plan — may
+not gain new members.
 
 `pre-commit` wiring lives in .pre-commit-config.yaml, but it clones hook
 envs over HTTPS — on the air-gapped RHEL box run the four commands above
