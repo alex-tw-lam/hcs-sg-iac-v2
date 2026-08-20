@@ -239,3 +239,117 @@ def test_apply_with_rules_full_flow(project, gw, capsys, monkeypatch):
         next(s.id for s in gw.list_security_groups() if s.name == "web")
     )
     assert len(rules) == 1 and rules[0].ports == "22"
+
+
+def test_apply_snapshot_pair_writes_and_notes_stale(
+    tmp_path, capsys, monkeypatch
+):
+    """Offline pre-work + live write pairing: snapshot.json present ->
+    plan reads the FILE (cloud lacks web), --yes writes to the gateway,
+    and the snapshot is honestly noted stale."""
+    from tests.conftest import GROUP_YAML, make_project
+
+    project = make_project(
+        tmp_path, {"security-groups/web/group.yaml": GROUP_YAML}
+    )
+    write_snapshot(
+        project,
+        nics_by_ip={
+            "10.0.1.10": [
+                {"port_id": "p1", "ip": "10.0.1.10", "vm_name": None}
+            ]
+        },
+    )
+    gw = seed(FakeGateway())
+    rc, out, err = run(
+        ["apply", "--yes", P, str(project)], gw, capsys, monkeypatch
+    )
+    assert rc == 0 and "Apply complete" in out
+    assert any(s.name == "web" for s in gw.list_security_groups())  # live
+    assert "planning from snapshot.json" in err  # pre-work was offline
+    assert "snapshot.json is now stale" in err
+
+
+def test_destroy_preview_precedes_writes(project, capsys, monkeypatch):
+    gw = seed(
+        FakeGateway(),
+        sgs=(("sg-1", "web", "web"),),
+        nics=(("10.0.1.10", "p1"),),
+        attached=(("sg-1", "p1"),),
+    )
+    rc, out, _ = run(
+        ["destroy", "web", "--yes", P, str(project)], gw, capsys, monkeypatch
+    )
+    assert rc == 0
+    assert out.index("2 to destroy") < out.index("Apply complete")
+    # 2 to destroy = member detach + group delete, previewed FIRST
+
+
+def test_drift_clean_rc0_and_json_envelope(project, capsys, monkeypatch):
+    write_snapshot(project, sgs=(("sg-web", "web", "web"),))
+    gw = seed(FakeGateway(), sgs=(("sg-web", "web", "web"),))
+    rc, out, _ = run(["drift", P, str(project)], gw, capsys, monkeypatch)
+    assert rc == 0 and "no drift" in out
+    rc, out, _ = run(
+        ["drift", "--json", P, str(project)], gw, capsys, monkeypatch
+    )
+    data = json.loads(out)  # one pure JSON doc
+    assert rc == 0
+    assert {
+        "created",
+        "reference",
+        "target",
+        "missingObjects",
+        "unexpectedObjects",
+        "changedObjects",
+    } == set(data["diff"])
+
+
+def test_import_force_overwrites_and_json_lists(tmp_path, capsys, monkeypatch):
+    from tests.conftest import GROUP_YAML, make_project
+
+    project = make_project(
+        tmp_path, {"security-groups/web/group.yaml": GROUP_YAML}
+    )
+    write_snapshot(project, sgs=(("sg-web", "web", "new-desc"),))
+    rc, _, _ = run(
+        ["import", "--force", P, str(project)], None, capsys, monkeypatch
+    )
+    assert rc == 0
+    assert (
+        "new-desc"
+        in (project / "security-groups" / "web" / "group.yaml").read_text()
+    )
+    rc, out, _ = run(
+        ["import", "--json", "--force", P, str(project)],
+        None,
+        capsys,
+        monkeypatch,
+    )
+    data = json.loads(out)
+    assert rc == 0
+    assert {"imported", "rules", "files", "notes"} == set(data)
+
+
+def test_plan_uses_snapshot_flag_not_just_autodetect(
+    tmp_path, capsys, monkeypatch
+):
+    """The --snapshot FILE path (vs auto-detected snapshot.json)."""
+    from tests.conftest import make_project
+
+    project = make_project(
+        tmp_path,
+        {"security-groups/web/group.yaml": "name: web\nmembers: []\n"},
+    )
+    other = project / "elsewhere"
+    other.mkdir()
+    write_snapshot(other, sgs=(("sg-x", "ghost", ""),))
+    for var in ("HCS_AK", "HCS_SK", "HCS_PROJECT_ID", "HCS_ENDPOINT"):
+        monkeypatch.delenv(var, raising=False)
+    rc, out, _ = run(
+        ["plan", "--snapshot", str(other / "snapshot.json"), P, str(project)],
+        None,
+        capsys,
+        monkeypatch,
+    )
+    assert rc == 0 and "Dry run" in out  # planned from the flag's file

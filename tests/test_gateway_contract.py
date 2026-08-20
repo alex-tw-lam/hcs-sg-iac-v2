@@ -8,6 +8,7 @@ import os
 
 import pytest
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
+from hcs_sg_iac.model.cloud import CloudNic, CloudSg
 from hcs_sg_iac.model.common import RemoteCidr, RemoteGroup
 from hcs_sg_iac.model.entities import Rule
 
@@ -146,3 +147,33 @@ def test_member_bind_unbind(make_gw):  # CTRCT-04
 @pytest.fixture(params=GATEWAYS, ids=lambda p: p.id)
 def make_gw(request):
     return request.param()
+
+
+def test_snapshot_gateway_replays_what_the_fake_observed(tmp_path):
+    """The reader-only third gateway joins the substitution story: its
+    inventory()/find_nics_by_ip must agree with the FakeGateway the
+    snapshot came from (the CLI's offline paths depend on it)."""
+
+    from hcs_sg_iac.adapters.snapshot_gateway import SnapshotGateway
+
+    fake = FakeGateway()
+    fake.add_sg(CloudSg(id="sg-1", name="web", description="d"))
+    fake.add_nic(CloudNic(port_id="p1", ip="10.0.1.10", vm_name="vm-a"))
+    fake._attached.add(("sg-1", "p1"))
+    inv = fake.inventory()
+    path = tmp_path / "snapshot.json"
+    from hcs_sg_iac.model.cloud import snapshot_to_json
+
+    path.write_text(
+        snapshot_to_json(
+            inv.snapshot.sgs,
+            inv.snapshot.rules,
+            inv.snapshot.attached,
+            inv.nics_by_ip,
+        )
+    )
+    replay = SnapshotGateway(path)
+    assert replay.inventory().snapshot == inv.snapshot
+    assert replay.find_nics_by_ip(["10.0.1.10"]) == fake.find_nics_by_ip(
+        ["10.0.1.10"]
+    )

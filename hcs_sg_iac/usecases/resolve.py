@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from hcs_sg_iac.model.common import Report
 from hcs_sg_iac.model.entities import DesiredState
+from hcs_sg_iac.model.gateway import CloudReader
 
 
 @dataclass(frozen=True)
@@ -15,7 +16,9 @@ class Resolution:
     overlaps: tuple = ()
 
 
-def resolve_memberships(reader, state: DesiredState) -> Resolution:
+def resolve_memberships(
+    reader: "CloudReader", state: DesiredState
+) -> Resolution:
     report = Report()
     all_ips = sorted({m.ip for g in state.groups.values() for m in g.members})
     matches = reader.find_nics_by_ip(all_ips) if all_ips else {}

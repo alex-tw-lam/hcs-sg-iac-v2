@@ -48,17 +48,6 @@ class DeleteRule:
     rule_id: str
 
 
-Payload = (
-    CreateSg
-    | UpdateSg
-    | DeleteSg
-    | AttachNic
-    | DetachNic
-    | CreateRule
-    | DeleteRule
-)
-
-
 # ---- display + dispatch ----
 @dataclass(frozen=True)
 class Action:

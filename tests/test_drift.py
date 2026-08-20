@@ -2,8 +2,9 @@
 """Drift diff: every change kind reports its line; the --json shape is
 Liquibase-diff; identical snapshots are empty."""
 
+from hcs_sg_iac.cli.render import render_drift_lines
 from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg, Snapshot
-from hcs_sg_iac.usecases.drift import diff_inventory, format_lines
+from hcs_sg_iac.usecases.drift import diff_inventory
 
 
 def _snap(sgs=(), rules=None, attached=None):
@@ -69,7 +70,7 @@ def test_every_change_kind_reports_a_line():
         },
         attached={"g1": [CloudNic(port_id="p-new", ip="10.0.1.10")]},
     )
-    lines = format_lines(diff_inventory(old, new))
+    lines = render_drift_lines(diff_inventory(old, new))
     text = "\n".join(lines)
     for expected in (
         "- group gone",
@@ -99,4 +100,4 @@ def test_identical_snapshots_are_empty():
         "unexpected": [],
         "changed": [],
     }
-    assert format_lines(diff_inventory(snap, snap)) == ()
+    assert render_drift_lines(diff_inventory(snap, snap)) == ()

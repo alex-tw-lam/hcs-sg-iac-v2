@@ -4,7 +4,6 @@ render. Dry run is the DEFAULT; --yes is the ONLY path to real writes —
 it confirms the preview the command prints first (no prompts)."""
 
 import argparse
-import datetime
 import json
 import logging
 import os
@@ -230,20 +229,22 @@ def _snapshot_stale_note(snap_arg) -> None:
         )
 
 
-def _write(gateway, al, args) -> int:
-    """Shared write tail for apply --yes and destroy --yes: preview is
-    already on screen, --yes IS the consent; rate exhaustion waits out
-    the window and continues (notice on stderr; --json stdout stays
-    pure). Returns rc (any non-ok action maps to 1)."""
+def _commit(ctx, al, args) -> int:
+    """Shared write tail for apply --yes and destroy --yes: preview
+    first, then execute (--yes IS the consent; rate exhaustion waits out
+    the window and continues, notice on stderr; --json stdout stays
+    pure), the end-of-run table, and the snapshot staleness note."""
+    _print_preview(ctx.gateway, al, args)
     results = pipeline.execute_confirmed(
-        gateway, al, sleep=time.sleep, notify=_notify
+        ctx.gateway, al, sleep=time.sleep, notify=_notify
     )
     _print_plan(
         al,
-        quota=pipeline.quota(gateway, al.actions),
+        quota=pipeline.quota(ctx.gateway, al.actions),
         args=args,
         executed=results,
     )
+    _snapshot_stale_note(ctx.stale_note_source())
     return 0 if all(r.status == "ok" for r in results) else 1
 
 
@@ -425,34 +426,24 @@ def _cmd_drift(args, ctx: _Ctx) -> int:
             file=sys.stderr,
         )
         return 1
+    if ctx.gateway is None:  # _resolve_ctx guarantees it for drift
+        return 1
     old = snapshot_from_json(
         ctx.snap_file.read_text(encoding="utf-8")
     ).snapshot
     result = drift_uc.diff_inventory(old, read_snapshot(ctx.gateway))
     n = sum(len(result[k]) for k in ("missing", "unexpected", "changed"))
-    if args.json:  # Liquibase-diff shape (reference=snapshot)
+    if args.json:
         print(
             json.dumps(
-                {
-                    "diff": {
-                        "created": datetime.datetime.now(
-                            datetime.UTC
-                        ).isoformat(),
-                        "reference": {
-                            "kind": "snapshot",
-                            "file": ctx.snap_arg or "snapshot.json",
-                        },
-                        "target": {"kind": "cloud"},
-                        "missingObjects": result["missing"],
-                        "unexpectedObjects": result["unexpected"],
-                        "changedObjects": result["changed"],
-                    }
-                },
+                render.render_drift_json(
+                    result, ctx.snap_arg or "snapshot.json"
+                ),
                 indent=2,
             )
         )
         return 1 if n else 0
-    lines = drift_uc.format_lines(result)
+    lines = render.render_drift_lines(result)
     if lines:
         print("\n".join(lines))
         print(f"\nDrift: {n} change(s) since the snapshot.")
@@ -497,10 +488,7 @@ def _cmd_destroy(args, ctx: _Ctx) -> int:
             al, quota=pipeline.quota(ctx.readers, al.actions), args=args
         )
         return 0
-    _print_preview(ctx.gateway, al, args)
-    rc = _write(ctx.gateway, al, args)
-    _snapshot_stale_note(ctx.stale_note_source())
-    return rc
+    return _commit(ctx, al, args)
 
 
 def _cmd_plan_apply(args, ctx: _Ctx) -> int:
@@ -521,10 +509,7 @@ def _cmd_plan_apply(args, ctx: _Ctx) -> int:
             args=args,
         )
         return 0
-    _print_preview(ctx.gateway, planned, args)  # changes visible, THEN write
-    rc = _write(ctx.gateway, planned, args)
-    _snapshot_stale_note(ctx.stale_note_source())
-    return rc
+    return _commit(ctx, planned, args)
 
 
 def main(argv=None, gateway=None) -> int:
