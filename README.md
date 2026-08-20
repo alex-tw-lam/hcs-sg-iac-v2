@@ -39,7 +39,28 @@ auto-/32). Protocol: tcp|udp|icmp|icmpv6|all. Ports: "80", "22,443",
 accepted). A missing `ingress:`/`egress:` section (or no rules file at
 all) = unmanaged — the tool never touches those cloud rules and `plan`
 lists them under NOT MANAGED; `[]` = remove all rules in that direction
-(extra confirmation). File names must equal the group name.
+(extra confirmation). File names must equal the group name. The
+self-referential rules HCS adds automatically on SG create (allow
+within the group) are preserved — never converged away, not even by a
+`[]` direction; a coded self-reference (`source: <own group>`) matches
+them instead of duplicating.
+
+## Install as a CLI tool (pipx / uv)
+
+`uv tool install` (uv's pipx) or `pipx install` give an isolated venv
+and `hcs-sg` on PATH:
+
+    uv tool install .                                        # local checkout
+    uv tool install git+ssh://git@ssh.github.com:443/alex-tw-lam/hcs-sg-iac-v2.git
+    pipx install "git+ssh://git@ssh.github.com:443/alex-tw-lam/hcs-sg-iac-v2.git"
+
+(the SSH-over-443 URL works on networks where github.com HTTPS is
+filtered; use `git+https://github.com/...` where it is not). Build
+distributables with `uv build` → `dist/` (sdist + wheel), installable
+via `uv tool install ./dist/hcs_sg_iac-*.whl` or
+`pipx install ./dist/...`. Environment variables (HCS_*, see
+Configure) are still required at runtime; upgrade with
+`uv tool upgrade hcs-sg-iac` / `pipx upgrade hcs-sg-iac`.
 
 ## JSON Schema
 

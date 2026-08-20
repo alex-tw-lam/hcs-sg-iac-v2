@@ -141,7 +141,11 @@ Diff per group:
 
 Rule identity for matching: (direction, protocol, normalized port set,
 remote). Cloud `remote_group_id` is translated to a group name when the SG is
-known in the account; `remote_ip_prefix` to a CIDR.
+known in the account; `remote_ip_prefix` to a CIDR. Self-referential
+rules the cloud auto-adds on SG create (remote_group_id = the SG
+itself) are preserved: they participate in matching (a coded
+self-reference converges against them) but are never stale — not even
+a managed `[]` direction strips them.
 
 Apply is sequential, resumable and idempotent, and only ever runs under
 `--yes` (without it, `apply`/`destroy` are dry runs): every cloud write goes through
