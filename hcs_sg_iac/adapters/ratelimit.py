@@ -7,6 +7,7 @@ project unmodified.
 Not thread-safe; safe on a single event loop (no await points). Wrap in
 a lock if called from threads.
 """
+
 import time
 
 from hcs_sg_iac.model.quota import Quota
@@ -20,18 +21,23 @@ class FixedWindowLimiter:
     quota is exhausted by other consumers). The override clears on rollover.
     """
 
-    def __init__(self, budget: int, window_seconds: float = 300.0,
-                 clock=time.time):
+    def __init__(
+        self, budget: int, window_seconds: float = 300.0, clock=time.time
+    ):
         self._budget = budget
         self._window = window_seconds
         self._clock = clock
         self._used = 0
-        self._window_start = clock()
-        self._limit_override = None
+        self._window_start: float = clock()
+        self._limit_override: int | None = None
 
     @property
     def limit(self) -> int:
-        return self._limit_override if self._limit_override is not None else self._budget
+        return (
+            self._limit_override
+            if self._limit_override is not None
+            else self._budget
+        )
 
     def _rollover(self) -> None:
         now = self._clock()
@@ -55,7 +61,9 @@ class FixedWindowLimiter:
 
     def snapshot(self) -> Quota:
         self._rollover()
-        return Quota(service_budget_calls=self._budget,
-                     used_calls=self._used,
-                     effective_limit=self.limit,
-                     window_resets_at=self._window_start + self._window)
+        return Quota(
+            service_budget_calls=self._budget,
+            used_calls=self._used,
+            effective_limit=self.limit,
+            window_resets_at=self._window_start + self._window,
+        )

@@ -5,6 +5,7 @@ dicts. `Quota` is what a limiter/gateway reports; `QuotaPlan` is what a
 plan table shows (calls needed vs what is left). asdict() keeps the
 JSON shapes (audit records, render --json) byte-identical to the dict
 era."""
+
 from dataclasses import asdict, dataclass
 
 
@@ -26,7 +27,7 @@ class Quota:
 @dataclass(frozen=True)
 class QuotaPlan:
     needed: int
-    left: "int | None"              # None = gateway without quota_snapshot
+    left: "int | None"  # None = gateway without quota_snapshot
 
     def asdict(self) -> dict:
         return {"needed": self.needed, "left": self.left}

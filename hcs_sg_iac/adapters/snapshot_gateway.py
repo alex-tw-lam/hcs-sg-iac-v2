@@ -3,6 +3,7 @@
 Powers offline pre-work — resolve + plan against `--snapshot` without
 credentials. The write protocols are deliberately ABSENT: the CLI pairs
 this reader with the real gateway when --yes writes land."""
+
 from pathlib import Path
 
 from hcs_sg_iac.model.cloud import Inventory, snapshot_from_json
@@ -21,8 +22,7 @@ class SnapshotGateway:
 
     # -- MembershipReader --
     def find_nics_by_ip(self, ips: list) -> dict:
-        return {ip: list(self._inv.nics_by_ip.get(ip, []))
-                for ip in ips}
+        return {ip: list(self._inv.nics_by_ip.get(ip, [])) for ip in ips}
 
     def list_attached_nics(self, sg_id: str) -> list:
         return list(self._inv.snapshot.attached.get(sg_id, []))

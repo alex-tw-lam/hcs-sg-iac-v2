@@ -190,6 +190,21 @@ validate`/`plan`, not expressible in a per-file schema.
 - Whole-group deletion only via explicit `destroy` (typed-name
   confirmation). Removing a file just unmanages the group.
 
+## Lint, format, types
+
+Four gates, all configured in pyproject.toml (black line-length 79 —
+the house style; ruff replaces flake8+isort+pyupgrade; mypy checks the
+prod ring only):
+
+    .venv/bin/python -m black .            # format
+    .venv/bin/python -m ruff check .       # lint (E/W/F/I/UP/B/SIM/C4/RUF)
+    .venv/bin/python -m mypy               # types (hcs_sg_iac only)
+    .venv/bin/python -m pytest -q          # behaviour
+
+`pre-commit` wiring lives in .pre-commit-config.yaml, but it clones hook
+envs over HTTPS — on the air-gapped RHEL box run the four commands above
+instead.
+
 ## Tests
 
     .venv/bin/python -m pytest -v                    # fast suite (fake gateway)

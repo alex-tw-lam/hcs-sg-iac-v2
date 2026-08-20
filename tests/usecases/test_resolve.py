@@ -12,8 +12,12 @@ def test_multiple_matches_lists_candidates():
     gw = FakeGateway()
     gw.add_nic(CloudNic(port_id="p1", ip="10.0.1.10"))
     gw.add_nic(CloudNic(port_id="p2", ip="10.0.1.10"))
-    res = resolve_memberships(gw, DesiredState(
-        groups={"web": Group("web", "", (Member("10.0.1.10"),))}, rules={}))
+    res = resolve_memberships(
+        gw,
+        DesiredState(
+            groups={"web": Group("web", "", (Member("10.0.1.10"),))}, rules={}
+        ),
+    )
     assert not res.report.ok
     assert "p1" in res.report.errors[0] and "p2" in res.report.errors[0]
-    assert "vm=" not in res.report.errors[0]    # skip vm segment when unknown
+    assert "vm=" not in res.report.errors[0]  # skip vm segment when unknown

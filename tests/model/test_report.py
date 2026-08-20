@@ -3,8 +3,9 @@
 alongside expect_warn). What stays: the exact "where: message" format
 and the exception-class distinctness — rows only do substring checks
 and behavioural separation."""
+
+from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.model.report import Report
-from hcs_sg_iac.model.errors import QuotaExhausted, CloudThrottled, CloudError
 
 
 def test_report_collects_errors_and_warnings():

@@ -1,6 +1,7 @@
 # hcs_sg_iac/usecases/resolve.py
 """Cloud membership validation: every member IP must resolve to exactly
 one NIC in the account. Overlaps between groups are allowed → info."""
+
 from dataclasses import dataclass, field
 
 from hcs_sg_iac.model.entities import DesiredState
@@ -9,7 +10,7 @@ from hcs_sg_iac.model.report import Report
 
 @dataclass(frozen=True)
 class Resolution:
-    nics: dict = field(default_factory=dict)     # ip -> CloudNic
+    nics: dict = field(default_factory=dict)  # ip -> CloudNic
     report: Report = field(default_factory=Report)
     overlaps: tuple = ()
 
@@ -23,15 +24,21 @@ def resolve_memberships(reader, state: DesiredState) -> Resolution:
         for m in g.members:
             found = matches.get(m.ip, [])
             if not found:
-                report.error(f"groups/{g.name}.yaml",
-                             f"ip {m.ip}: no NIC found in any VPC of the account")
+                report.error(
+                    f"groups/{g.name}.yaml",
+                    f"ip {m.ip}: no NIC found in any VPC of the account",
+                )
             elif len(found) > 1:
-                cands = ", ".join(f"port={n.port_id}"
-                                  + (f" vm={n.vm_name}" if n.vm_name else "")
-                                  for n in found)
-                report.error(f"groups/{g.name}.yaml",
-                             f"ip {m.ip}: matches multiple NICs ({cands}) — "
-                             f"use a unique IP or a nic: entry")
+                cands = ", ".join(
+                    f"port={n.port_id}"
+                    + (f" vm={n.vm_name}" if n.vm_name else "")
+                    for n in found
+                )
+                report.error(
+                    f"groups/{g.name}.yaml",
+                    f"ip {m.ip}: matches multiple NICs ({cands}) — "
+                    f"use a unique IP or a nic: entry",
+                )
             else:
                 nics[m.ip] = found[0]
 

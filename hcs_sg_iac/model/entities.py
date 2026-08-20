@@ -1,10 +1,11 @@
 # hcs_sg_iac/model/entities.py
 """Domain entities. The model IS the schema: from-dict constructors
 validate everything and report ALL violations into the Report."""
+
 import ipaddress
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import cast
 
 from hcs_sg_iac.model.portset import PortError, PortSet, parse_ports
 from hcs_sg_iac.model.remote import Remote, parse_remote
@@ -24,14 +25,14 @@ class Member:
 class Group:
     name: str
     description: str
-    members: tuple            # tuple[Member, ...]
+    members: tuple  # tuple[Member, ...]
 
 
 @dataclass(frozen=True)
 class Rule:
-    direction: str            # "ingress" | "egress"
+    direction: str  # "ingress" | "egress"
     protocol: str
-    ports: "PortSet | None"   # canonical form; None = all ports
+    ports: "PortSet | None"  # canonical form; None = all ports
     remote: Remote
 
     def __post_init__(self):
@@ -47,16 +48,16 @@ class Rule:
 @dataclass(frozen=True)
 class RulesFile:
     security_group: str
-    ingress: tuple            # tuple[Rule, ...]
+    ingress: tuple  # tuple[Rule, ...]
     egress: tuple
-    ingress_managed: bool     # section present (even if [])
+    ingress_managed: bool  # section present (even if [])
     egress_managed: bool
 
 
 @dataclass(frozen=True)
 class DesiredState:
-    groups: dict              # name -> Group
-    rules: dict               # name -> RulesFile (only groups WITH a rules file)
+    groups: dict  # name -> Group
+    rules: dict  # name -> RulesFile (only groups WITH a rules file)
 
 
 def _looks_like_ip(name: str) -> bool:
@@ -70,7 +71,7 @@ def _looks_like_ip(name: str) -> bool:
         return False
 
 
-def parse_group(d, where: str, report: Report) -> Optional[Group]:
+def parse_group(d, where: str, report: Report) -> Group | None:
     """Parse one groups/<name>.yaml document (a plain dict)."""
     if not isinstance(d, dict):
         report.error(where, "group file must be a YAML mapping")
@@ -83,7 +84,9 @@ def parse_group(d, where: str, report: Report) -> Optional[Group]:
         report.error(where, f"name {name!r} must not look like an IP/CIDR")
         name = None
     elif not GROUP_NAME_RE.fullmatch(name):
-        report.error(where, f"name {name!r} must match {GROUP_NAME_RE.pattern}")
+        report.error(
+            where, f"name {name!r} must match {GROUP_NAME_RE.pattern}"
+        )
         name = None
     description = d.get("description", "")
     ok = True
@@ -118,7 +121,9 @@ def parse_group(d, where: str, report: Report) -> Optional[Group]:
             report.error(mwhere, f"ip {ip!r}: IPv6 is not supported")
             ok = False
             continue
-        ip = str(ip_obj)   # canonical spelling: duplicate check is address-based
+        ip = str(
+            ip_obj
+        )  # canonical spelling: duplicate check is address-based
         if ip in seen:
             report.error(mwhere, f"duplicate ip {ip} in group")
             ok = False
@@ -127,12 +132,20 @@ def parse_group(d, where: str, report: Report) -> Optional[Group]:
         members.append(Member(ip=ip))
     if name is None:
         ok = False
-    return Group(name=name, description=description,
-                 members=tuple(members)) if ok else None
+    return (
+        Group(
+            name=cast(str, name),
+            description=description,
+            members=tuple(members),
+        )
+        if ok
+        else None
+    )
 
 
-def _parse_rules(d, where: str, report: Report, key: str, direction: str,
-                 remote_key: str):
+def _parse_rules(
+    d, where: str, report: Report, key: str, direction: str, remote_key: str
+):
     """Parse the ingress/egress list of a rules document.
 
     Returns (rules, ok); rules is None when the section is absent
@@ -140,11 +153,14 @@ def _parse_rules(d, where: str, report: Report, key: str, direction: str,
     """
     rules, seen, ok = [], set(), True
     if key not in d:
-        return None, True            # section absent -> unmanaged
+        return None, True  # section absent -> unmanaged
     raw = d[key]
     if raw is None:
-        report.error(where, f"{key} must be a list (use [] for remove-all, "
-                             f"or delete the key to leave the direction unmanaged)")
+        report.error(
+            where,
+            f"{key} must be a list (use [] for remove-all, "
+            f"or delete the key to leave the direction unmanaged)",
+        )
         return (), False
     if not isinstance(raw, list):
         report.error(where, f"{key} must be a list")
@@ -157,18 +173,25 @@ def _parse_rules(d, where: str, report: Report, key: str, direction: str,
             continue
         remote_raw = rd.get(remote_key)
         if not isinstance(remote_raw, str) or not remote_raw:
-            report.error(rwhere, f"{remote_key} is required (group name or CIDR)")
+            report.error(
+                rwhere, f"{remote_key} is required (group name or CIDR)"
+            )
             ok = False
             continue
         try:
             remote = parse_remote(remote_raw)
         except ValueError:
-            report.error(rwhere, f"{remote_key} {remote_raw!r} is not a valid CIDR")
+            report.error(
+                rwhere, f"{remote_key} {remote_raw!r} is not a valid CIDR"
+            )
             ok = False
             continue
         protocol = rd.get("protocol")
         if protocol not in PROTOCOLS:
-            report.error(rwhere, f"protocol must be one of {PROTOCOLS}, got {protocol!r}")
+            report.error(
+                rwhere,
+                f"protocol must be one of {PROTOCOLS}, got {protocol!r}",
+            )
             ok = False
             continue
         ports_raw = rd.get("ports")
@@ -182,12 +205,16 @@ def _parse_rules(d, where: str, report: Report, key: str, direction: str,
             report.error(rwhere, str(e))
             ok = False
             continue
-        rule = Rule(direction=direction, protocol=protocol, ports=ports,
-                    remote=remote)
+        rule = Rule(
+            direction=direction, protocol=protocol, ports=ports, remote=remote
+        )
         if rule.identity() in seen:
-            report.error(rwhere, f"duplicate {direction} rule "
-                                 f"(protocol={protocol}, ports={ports}, "
-                                 f"{remote_key}={remote_raw})")
+            report.error(
+                rwhere,
+                f"duplicate {direction} rule "
+                f"(protocol={protocol}, ports={ports}, "
+                f"{remote_key}={remote_raw})",
+            )
             ok = False
             continue
         seen.add(rule.identity())
@@ -195,7 +222,7 @@ def _parse_rules(d, where: str, report: Report, key: str, direction: str,
     return tuple(rules), ok
 
 
-def parse_rules_file(d, where: str, report: Report) -> Optional[RulesFile]:
+def parse_rules_file(d, where: str, report: Report) -> RulesFile | None:
     """Parse one rules/<name>.yaml document (a plain dict)."""
     if not isinstance(d, dict):
         report.error(where, "rules file must be a YAML mapping")
@@ -203,13 +230,25 @@ def parse_rules_file(d, where: str, report: Report) -> Optional[RulesFile]:
     sg = d.get("security_group")
     ok = True
     if not isinstance(sg, str) or not GROUP_NAME_RE.fullmatch(sg or ""):
-        report.error(where, f"security_group {sg!r} must match {GROUP_NAME_RE.pattern}")
+        report.error(
+            where, f"security_group {sg!r} must match {GROUP_NAME_RE.pattern}"
+        )
         ok = False
-    ingress, ok_in = _parse_rules(d, where, report, "ingress", "ingress",
-                                  "source")
-    egress, ok_eg = _parse_rules(d, where, report, "egress", "egress",
-                                 "destination")
+    ingress, ok_in = _parse_rules(
+        d, where, report, "ingress", "ingress", "source"
+    )
+    egress, ok_eg = _parse_rules(
+        d, where, report, "egress", "egress", "destination"
+    )
     ok = ok and ok_in and ok_eg
-    return RulesFile(security_group=sg, ingress=ingress or (), egress=egress or (),
-                     ingress_managed=ingress is not None,
-                     egress_managed=egress is not None) if ok else None
+    return (
+        RulesFile(
+            security_group=cast(str, sg),
+            ingress=ingress or (),
+            egress=egress or (),
+            ingress_managed=ingress is not None,
+            egress_managed=egress is not None,
+        )
+        if ok
+        else None
+    )

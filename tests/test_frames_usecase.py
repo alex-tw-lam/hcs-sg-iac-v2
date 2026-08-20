@@ -2,25 +2,30 @@
 """Tier-2 consumer: interprets tier-2 Frame rows (tests/specs/frames.py)
 against load/validate/resolve/plan/execute/render (FakeGateway) plus the
 pure adapter helpers (rate limiter, SDK rule translation)."""
+
 import json
 from types import SimpleNamespace
 
 import pytest
-
 from hcs_sg_iac.adapters import yaml_config
-from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.adapters.huawei_gateway import HuaweiGateway
 from hcs_sg_iac.adapters.ratelimit import FixedWindowLimiter
 from hcs_sg_iac.cli import render
 from hcs_sg_iac.model.entities import Rule
-from hcs_sg_iac.usecases import apply as apply_uc
-from hcs_sg_iac.usecases import importer as import_uc
-from hcs_sg_iac.usecases import pipeline, resolve as resolve_uc, \
-    validate as validate_uc
 from hcs_sg_iac.model.quota import QuotaPlan
 from hcs_sg_iac.model.remote import RemoteGroup
-from tests.specs.builders import check_cloud, make_project, remote_from_tag, \
-    seed_gateway
+from hcs_sg_iac.usecases import apply as apply_uc
+from hcs_sg_iac.usecases import importer as import_uc
+from hcs_sg_iac.usecases import pipeline
+from hcs_sg_iac.usecases import resolve as resolve_uc
+from hcs_sg_iac.usecases import validate as validate_uc
+
+from tests.specs.builders import (
+    check_cloud,
+    make_project,
+    remote_from_tag,
+    seed_gateway,
+)
 from tests.specs.frames import TIER2
 
 
@@ -39,19 +44,29 @@ def _plan(gw, root):
 
 
 def _execute(gw, al, audit=None):
-    return apply_uc.execute(al, sg_writer=gw, rule_writer=gw, binder=gw,
-                            audit=audit)
+    return apply_uc.execute(
+        al, sg_writer=gw, rule_writer=gw, binder=gw, audit=audit
+    )
 
 
 def _check_plan(frame, al):
     if frame.expect_actions is not None:
-        assert len(al.actions) == len(frame.expect_actions), \
-            (frame.id, [(a.sign, a.type, a.group, a.detail) for a in al.actions])
-        for action, want in zip(al.actions, frame.expect_actions):
-            assert (action.sign, action.type, action.group) == want[:3], \
-                (frame.id, want, action.detail)
+        assert len(al.actions) == len(frame.expect_actions), (
+            frame.id,
+            [(a.sign, a.type, a.group, a.detail) for a in al.actions],
+        )
+        for action, want in zip(al.actions, frame.expect_actions, strict=True):
+            assert (action.sign, action.type, action.group) == want[:3], (
+                frame.id,
+                want,
+                action.detail,
+            )
             if len(want) == 4:
-                assert want[3] in action.detail, (frame.id, want, action.detail)
+                assert want[3] in action.detail, (
+                    frame.id,
+                    want,
+                    action.detail,
+                )
     if frame.expect_unmanaged is not None:
         assert al.unmanaged == frame.expect_unmanaged, frame.id
     if frame.expect_clears is not None:
@@ -97,7 +112,10 @@ def test_frame(frame, tmp_path):
         else:
             assert not res.report.ok, frame.id
             for sub in frame.expect_error_contains:
-                assert any(sub in e for e in res.report.errors), (frame.id, sub)
+                assert any(sub in e for e in res.report.errors), (
+                    frame.id,
+                    sub,
+                )
         for ip, port_id in frame.expect_nics or ():
             assert res.nics[ip].port_id == port_id, (frame.id, ip)
         if frame.expect_overlaps is not None:
@@ -119,7 +137,10 @@ def test_frame(frame, tmp_path):
         assert all(r.status == "ok" for r in results), frame.id
         _check_plan(frame, al)
         if frame.expect_call_log is not None:
-            assert gw.call_log == frame.expect_call_log, (frame.id, gw.call_log)
+            assert gw.call_log == frame.expect_call_log, (
+                frame.id,
+                gw.call_log,
+            )
 
     elif usecase in ("execute", "execute_resume"):
         if usecase == "execute":
@@ -127,13 +148,18 @@ def test_frame(frame, tmp_path):
         else:
             phases = frame.model_input["phases"]
         statuses = []
-        records = []                      # audit sink, when the row wants it
+        records = []  # audit sink, when the row wants it
         for i, phase in enumerate(phases):
             gw.budget = phase.get("budget")
-            results = _execute(gw, _plan(gw, root),
-                               audit=records.append
-                               if (i == 0 and frame.expect_audit is not None)
-                               else None)
+            results = _execute(
+                gw,
+                _plan(gw, root),
+                audit=(
+                    records.append
+                    if (i == 0 and frame.expect_audit is not None)
+                    else None
+                ),
+            )
             statuses.append(tuple(r.status for r in results))
         if frame.expect_phases is not None:
             assert tuple(statuses) == frame.expect_phases, (frame.id, statuses)
@@ -141,29 +167,43 @@ def test_frame(frame, tmp_path):
             assert statuses[-1] == frame.expect_results, (frame.id, statuses)
         if frame.expect_audit is not None:
             assert records, frame.id
-            assert set(records[-1]["created"]) == set(frame.expect_audit), frame.id
+            assert set(records[-1]["created"]) == set(
+                frame.expect_audit
+            ), frame.id
             for r in records[-1]["actions"]:
-                assert {"group", "type", "cloud_id", "detail", "status"} \
-                    <= set(r), frame.id
+                assert {
+                    "group",
+                    "type",
+                    "cloud_id",
+                    "detail",
+                    "status",
+                } <= set(r), frame.id
         if usecase == "execute_resume":
-            assert _plan(gw, root).actions == (), frame.id   # converged
+            assert _plan(gw, root).actions == (), frame.id  # converged
         if frame.expect_call_log is not None:
-            assert gw.call_log == frame.expect_call_log, (frame.id, gw.call_log)
+            assert gw.call_log == frame.expect_call_log, (
+                frame.id,
+                gw.call_log,
+            )
 
     elif usecase == "import":
         imp = import_uc.import_snapshot(gw.inventory().snapshot)
         want = frame.expect_value or {}
         assert sorted(imp.groups) == want["groups"], frame.id
         for gname, ips in want.get("members", {}).items():
-            assert tuple(m.ip for m in imp.groups[gname].members) == ips, \
-                (frame.id, gname)
+            assert tuple(m.ip for m in imp.groups[gname].members) == ips, (
+                frame.id,
+                gname,
+            )
         for gname, rows in want.get("rules", {}).items():
             rf = imp.rules[gname]
 
             def sig(r):
-                remote = ("group", r.remote.name) \
-                    if isinstance(r.remote, RemoteGroup) \
+                remote = (
+                    ("group", r.remote.name)
+                    if isinstance(r.remote, RemoteGroup)
                     else ("cidr", r.remote.cidr)
+                )
                 return (r.direction, r.protocol, r.ports, remote)
 
             got = [sig(r) for r in rf.ingress] + [sig(r) for r in rf.egress]
@@ -180,8 +220,9 @@ def test_frame(frame, tmp_path):
         if usecase == "render_plan":
             out = render.render_plan(al, quota=quota, dry_run=True)
         elif usecase == "render_exec":
-            out = render.render_plan(al, quota=quota,
-                                     executed=_execute(gw, al), dry_run=False)
+            out = render.render_plan(
+                al, quota=quota, executed=_execute(gw, al), dry_run=False
+            )
         else:
             out = render.render_json(al, quota=quota)
             data = json.loads(out)
@@ -202,18 +243,23 @@ def test_frame(frame, tmp_path):
             elif op[0] == "delete_sg":
                 gw.delete_security_group(op[1])
             elif op[0] == "create_rule":
-                gw.create_rule(op[1], Rule(op[2], op[3], op[4],
-                                           remote_from_tag(op[5])))
+                gw.create_rule(
+                    op[1], Rule(op[2], op[3], op[4], remote_from_tag(op[5]))
+                )
             else:
                 pytest.fail(f"{frame.id}: unknown fake op {op!r}")
         if frame.expect_call_log is not None:
-            assert gw.call_log == frame.expect_call_log, (frame.id, gw.call_log)
+            assert gw.call_log == frame.expect_call_log, (
+                frame.id,
+                gw.call_log,
+            )
 
     elif usecase == "ratelimit":
         spec = frame.model_input
         clock = _Clock()
-        lim = FixedWindowLimiter(budget=spec["budget"],
-                                 window_seconds=spec["window"], clock=clock)
+        lim = FixedWindowLimiter(
+            budget=spec["budget"], window_seconds=spec["window"], clock=clock
+        )
         got = []
         for op in spec["ops"]:
             if op[0] == "acquire":
@@ -228,13 +274,16 @@ def test_frame(frame, tmp_path):
 
     elif usecase == "translate_rule":
         spec = frame.model_input
-        wire = SimpleNamespace(id=spec["id"], security_group_id=spec["sg"],
-                               direction=spec["direction"],
-                               protocol=spec.get("protocol"),
-                               port_range_min=spec.get("min"),
-                               port_range_max=spec.get("max"),
-                               remote_group_id=spec.get("rgid"),
-                               remote_ip_prefix=spec.get("prefix"))
+        wire = SimpleNamespace(
+            id=spec["id"],
+            security_group_id=spec["sg"],
+            direction=spec["direction"],
+            protocol=spec.get("protocol"),
+            port_range_min=spec.get("min"),
+            port_range_max=spec.get("max"),
+            remote_group_id=spec.get("rgid"),
+            remote_ip_prefix=spec.get("prefix"),
+        )
         cr = HuaweiGateway.__new__(HuaweiGateway)._to_cloud_rule(wire)
         for key, want in frame.expect_value.items():
             assert getattr(cr, key) == want, (frame.id, key)

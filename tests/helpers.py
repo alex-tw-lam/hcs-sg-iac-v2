@@ -1,5 +1,6 @@
 # tests/helpers.py
 """Shared test scaffolding (importable because tests/ is a package)."""
+
 import time
 
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
@@ -28,6 +29,7 @@ class ExhaustOnce(FakeGateway):
     def create_security_group(self, name, description):
         if not self.raised:
             self.raised = True
-            raise QuotaExhausted("budget exhausted for this window",
-                                 retry_at=self._deadline)
+            raise QuotaExhausted(
+                "budget exhausted for this window", retry_at=self._deadline
+            )
         return super().create_security_group(name, description)
