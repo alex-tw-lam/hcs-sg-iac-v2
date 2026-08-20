@@ -79,6 +79,13 @@ overwrite existing files without `--force`; delete a file to unmanage.
     .venv/bin/python -m pytest -q                # behaviour
     .venv/bin/radon cc hcs_sg_iac -n C -s        # complexity report (no block above rank C)
     .venv/bin/radon mi hcs_sg_iac -s             # maintainability (all rank A)
+    trivy fs --scanners vuln,secret --skip-dirs .venv .   # CVEs + secrets
+
+Trivy reads uv.lock when present; `.trivyignore` records the one
+vendor-blocked acceptance (the SDK caps pyasn1 at 0.6.3 — see the file
+for the reason and re-review trigger). First trivy run downloads the
+vulnerability DB; the air-gapped RHEL box needs the offline DB (trivy
+docs: "Air-Gapped Environment") or simply runs the scan elsewhere.
 
 Real-cloud contract tests (fake always, real gated on credentials):
 
