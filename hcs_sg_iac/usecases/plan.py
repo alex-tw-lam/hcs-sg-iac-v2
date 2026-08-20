@@ -21,9 +21,9 @@ from hcs_sg_iac.model.actions import (
     UpdateSg,
 )
 from hcs_sg_iac.model.cloud import CloudRule, Snapshot
+from hcs_sg_iac.model.common import RemoteGroup
 from hcs_sg_iac.model.entities import DesiredState, Rule
 from hcs_sg_iac.model.portset import PortSet
-from hcs_sg_iac.model.remote import RemoteGroup
 from hcs_sg_iac.usecases.resolve import Resolution
 
 _log = logging.getLogger(__name__)  # --verbose: wired by the CLI
@@ -34,21 +34,12 @@ def _q(s: str) -> str:
     return json.dumps(s)
 
 
-def read_snapshot(sg_reader, membership_reader) -> Snapshot:
-    """Assemble the cloud snapshot via the reader protocols. Gateways
-    able to fetch SGs-with-embedded-rules + ports in one pass expose
-    inventory(); the per-SG loop below is the protocol-level fallback
-    (fake gateway, any future adapter)."""
+def read_snapshot(gateway) -> Snapshot:
+    """The observed cloud in one pass. inventory() is THE read seam
+    (every gateway implements it); the old per-SG fallback loop died
+    with the protocol sprawl."""
     _log.info("phase: reading cloud snapshot")
-    if hasattr(sg_reader, "inventory"):
-        return sg_reader.inventory().snapshot
-    sgs = tuple(sg_reader.list_security_groups())
-    rules, attached = {}, {}
-    for sg in sgs:
-        _log.info("phase: reading rules for %s (%s)", sg.name, sg.id)
-        rules[sg.id] = list(sg_reader.list_rules(sg.id))
-        attached[sg.id] = list(membership_reader.list_attached_nics(sg.id))
-    return Snapshot(sgs=sgs, rules=rules, attached=attached)
+    return gateway.inventory().snapshot
 
 
 def _sub_rules(rule: Rule) -> tuple:

@@ -13,7 +13,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
-from hcs_sg_iac.model.remote import RemoteCidr, RemoteGroup
+from hcs_sg_iac.model.common import RemoteCidr, RemoteGroup
 
 
 @dataclass(frozen=True)

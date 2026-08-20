@@ -53,8 +53,8 @@ from hcs_sg_iac.model.cloud import (
     Inventory,
     Snapshot,
 )
+from hcs_sg_iac.model.common import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.model.entities import Rule
-from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.model.portset import (  # PortSet via _bounds
     PortSet,
     parse_ports,

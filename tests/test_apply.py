@@ -5,7 +5,7 @@ side), mid-failure isolation, dependent skipping, ordering."""
 import time
 
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
-from hcs_sg_iac.model.errors import CloudError, CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.common import CloudError, CloudThrottled, QuotaExhausted
 from hcs_sg_iac.usecases import pipeline
 from hcs_sg_iac.usecases.apply import execute
 
