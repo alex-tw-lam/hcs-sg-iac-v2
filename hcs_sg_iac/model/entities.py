@@ -10,7 +10,7 @@ from hcs_sg_iac.model.portset import PortError, parse_ports
 from hcs_sg_iac.model.remote import Remote, parse_remote
 from hcs_sg_iac.model.report import Report
 
-GROUP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+GROUP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 PROTOCOLS = ("tcp", "udp", "icmp", "icmpv6", "all")
 _NO_PORTS_PROTOCOLS = ("icmp", "icmpv6", "all")
 

@@ -13,7 +13,7 @@ loader/usecase/adapter · **T3** cli-e2e · **T4** cloud-contract
 
 | Field | Atomic choices |
 |---|---|
-| `name` | `web-tier` (valid) · `a` (single char) · `1web` (digit-leading, valid) · `"a"×64` (boundary valid) · `"a"×65` (too long) · `Web` (uppercase) · `web_tier` (underscore) · `-web` (leading hyphen) · `web-` (trailing hyphen, valid) · `10.0.1.10` (IP-lookalike) · `10.0.0.0/8` (CIDR-lookalike) · `""` · absent · `123` (non-string) |
+| `name` | `web-tier` (valid) · `a` (single char) · `1web` (digit-leading, valid) · `"a"×64` (boundary valid) · `"a"×65` (too long) · `Web` (uppercase) · `web_tier` (underscore, valid) · `-web` (leading hyphen) · `web-` (trailing hyphen, valid) · `10.0.1.10` (IP-lookalike) · `10.0.0.0/8` (CIDR-lookalike) · `""` · absent · `123` (non-string) |
 | `description` | absent (→ `""`) · `""` · `"web"` · `5` (non-string) |
 | `members` | absent (→ `[]`) · `[]` · valid list · `"10.0.1.10"` (non-list) |
 | `members[i]` | `{"ip": "10.0.1.10"}` · with extra keys (tolerated) · `"10.0.1.10"` (bare string) · `{}` (no ip key) · `{"ip": 10}` · `{"ip": "999.0.0.1"}` · `{"ip": "010.0.1.10"}` · `{"ip": "::1"}` · duplicate entry |

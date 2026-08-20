@@ -54,7 +54,7 @@ never guesses.
 ### 2.1 Group file — `groups/<name>.yaml`
 
 ```yaml
-name: web-tier            # ^[a-z0-9][a-z0-9-]{0,63}$ (1-64 chars); must not parse as IP/CIDR
+name: web-tier            # ^[a-z0-9][a-z0-9_-]{0,63}$ (1-64 chars); must not parse as IP/CIDR
 description: "Public web tier"
 
 members:                  # membership = the IP list, this file is the truth

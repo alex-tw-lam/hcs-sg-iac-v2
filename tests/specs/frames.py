@@ -152,9 +152,9 @@ FRAMES: list = [
     Frame("NAME-02", 1, "A1", "uppercase name is rejected with the regex",
           model_call="parse_group", model_input={"name": "Web", "members": []},
           expect_ok=False, expect_error_contains=("must match",)),
-    Frame("NAME-02.a", 1, "A1", "underscore name is rejected",
+    Frame("NAME-01.e", 1, "A1", "underscore name is valid (org naming dev_sg_iac_x_*)",
           model_call="parse_group", model_input={"name": "web_tier", "members": []},
-          expect_ok=False, expect_error_contains=("must match",)),
+          expect_ok=True, expect_value=("web_tier", "", ())),
     Frame("NAME-02.b", 1, "A1", "leading-hyphen name is rejected",
           model_call="parse_group", model_input={"name": "-web", "members": []},
           expect_ok=False, expect_error_contains=("must match",)),
@@ -1356,6 +1356,18 @@ FRAMES: list = [
                         "rules": {"ok": []},
                         "notes": ("cannot become a config file",
                                   "not a v4 CIDR")}),
+    Frame("IMP-03.a", 2, "A27",
+          "unset remote imports as explicit 0.0.0.0/0 (the plan engine's "
+          "'API default when unset') — not a phantom stale delete",
+          cloud={"sgs": [{"id": "sg-a", "name": "app"}],
+                 "rules": [
+                     {"id": "r1", "sg": "sg-a", "direction": "ingress",
+                      "protocol": "tcp", "ports": "80"}]},   # no rgid/prefix
+          usecase="import",
+          expect_value={"groups": ["app"],
+                        "rules": {"app": [("ingress", "tcp", "80",
+                                           ("cidr", "0.0.0.0/0"))]},
+                        "notes": ()}),
     Frame("IMP-04", 3, "A27",
           "import writes groups/ and rules/ from snapshot.json, offline",
           files={"snapshot.json": _snapshot(

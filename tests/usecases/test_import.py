@@ -23,6 +23,9 @@ def _seeded():
     gw.add_rule(CloudRule(id="r-db", sg_id="sg-db", direction="ingress",
                           protocol="tcp", ports="5432",
                           remote_group_id="sg-web", remote_ip_prefix=None))
+    gw.add_rule(CloudRule(id="r-any", sg_id="sg-db", direction="ingress",
+                          protocol=None, ports=None,          # unset remote
+                          remote_group_id=None, remote_ip_prefix=None))
     gw.add_nic(CloudNic(port_id="p1", ip="10.0.1.10", vm_name="vm1"))
     gw._attached.add(("sg-web", "p1"))
     return gw

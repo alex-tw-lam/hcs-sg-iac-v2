@@ -10,7 +10,7 @@
   "properties": {
     "name": {
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
       "description": "must not parse as an IP/CIDR (enforced beyond the pattern at load time)"
     },
     "description": {

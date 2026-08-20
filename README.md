@@ -110,12 +110,21 @@ is skipped **with a note, never silently**: names that cannot be file
 names, duplicate cloud names (config keys groups by name — the first id
 wins, and rules that referenced a loser by id are skipped too),
 self-referential rules (implicit: the platform re-adds them and the
-plan preserves them), IPv6 remotes and unknown protocols. Note the
+plan preserves them), IPv6 remotes and unknown protocols. A rule whose
+remote is UNSET imports as an explicit 0.0.0.0/0 — the plan engine
+already reads such cloud rules as "anywhere" (API default when unset),
+so import agrees instead of planning a phantom delete. Note the
 consequence spelled out in each note: a skipped RULE is no longer
 wanted, so the next plan shows it as a stale delete — remove it in the
 cloud first if you want to keep it. The property is pinned by test:
 import → write → load → plan converges with zero actions on a
 representable cloud.
+
+`import` adopts EVERYTHING representable — including SGs whose rules a
+platform controller (CCE, GaussDB, …) edits on its own. Managing those
+means every controller change becomes drift and the next `apply` would
+revert it; keep such groups out deliberately (delete their files — a
+group without a file is simply unmanaged).
 
 ## Logging
 
@@ -153,7 +162,9 @@ Static copies live in `schemas/*.schema.json` (JSON Schema draft
 after model changes:
 
     hcs-sg schema group > schemas/group-file.schema.json
-    hcs-sg schema rules > schemas/rules-file.schema.json Single-file constraints only — filename==name, cross-file
+    hcs-sg schema rules > schemas/rules-file.schema.json
+
+Single-file constraints only — filename==name, cross-file
 group refs and cloud-side IP resolution are validated by `hcs-sg
 validate`/`plan`, not expressible in a per-file schema.
 
