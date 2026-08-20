@@ -2969,7 +2969,7 @@ FRAMES: list = [
         expect_rc=0,
         expect_err=("hcs-sg: phase: importing from", "hcs-sg: phase: writing"),
         expect_out_absent=("gateway call",),
-        expect_files=("groups/web.yaml",),
+        expect_files=("security-groups/web/group.yaml",),
     ),
     Frame(
         "SNAP-01",
@@ -3253,7 +3253,11 @@ FRAMES: list = [
             "self-referential",
             "now managed",
         ),
-        expect_files=("groups/web.yaml", "rules/web.yaml"),
+        expect_files=(
+            "security-groups/web/group.yaml",
+            "security-groups/web/ingress.yaml",
+            "security-groups/web/egress.yaml",
+        ),
     ),
     Frame(
         "IMP-05",
@@ -3295,6 +3299,81 @@ FRAMES: list = [
         expect_files=("groups/web.yaml",),
     ),
     Frame(
+        "DIR-01",
+        2,
+        "A12",
+        "per-SG directory layout loads: group.yaml + both directions",
+        files={
+            "security-groups/web/group.yaml": _group(members=("10.0.1.10",)),
+            "security-groups/web/ingress.yaml": (
+                "- {source: 203.0.113.0/24, protocol: tcp, ports: '22'}\n"
+            ),
+            "security-groups/web/egress.yaml": "[]\n",
+        },
+        usecase="load",
+        expect_ok=True,
+        expect_value={"groups": ["web"], "rules": ["web"]},
+    ),
+    Frame(
+        "DIR-02",
+        2,
+        "A12",
+        "absent ingress.yaml = unmanaged ingress (cloud rules untouched)",
+        files={
+            "security-groups/web/group.yaml": _group(members=()),
+            "security-groups/web/egress.yaml": "[]\n",
+        },
+        usecase="load",
+        expect_ok=True,
+        expect_value={"groups": ["web"], "rules": ["web"]},
+    ),
+    Frame(
+        "DIR-03",
+        2,
+        "A12",
+        "mixing the two layouts is a clean error",
+        files={
+            "groups/web.yaml": _group(members=()),
+            "security-groups/web/group.yaml": _group(members=()),
+        },
+        usecase="load",
+        expect_ok=False,
+        expect_error_contains=("two layouts mixed",),
+    ),
+    Frame(
+        "DIR-04",
+        2,
+        "A12",
+        "directory name must equal the group name inside group.yaml",
+        files={
+            "security-groups/web/group.yaml": (
+                "name: db\ndescription: ''\nmembers: []\n"
+            ),
+        },
+        usecase="load",
+        expect_ok=False,
+        expect_error_contains=("directory name must equal group name",),
+    ),
+    Frame(
+        "CLI-25",
+        3,
+        "A20",
+        "plan works end-to-end on the per-SG directory layout",
+        **_cli(
+            argv=["plan"],
+            expect_rc=0,
+            expect_out=("+", "member", "Dry run"),
+            files={
+                "security-groups/web/group.yaml": _group(),
+                "security-groups/web/ingress.yaml": (
+                    "- {source: 203.0.113.0/24, protocol: tcp,"
+                    " ports: '22'}\n"
+                ),
+                "security-groups/web/egress.yaml": "[]\n",
+            },
+        ),
+    ),
+    Frame(
         "IMP-08",
         3,
         "A27",
@@ -3304,7 +3383,7 @@ FRAMES: list = [
         inject_gateway=False,
         expect_rc=0,
         expect_json={"imported": ["web"]},
-        expect_files=("groups/web.yaml", "rules/web.yaml"),
+        expect_files=("security-groups/web/group.yaml",),
     ),
 ]
 

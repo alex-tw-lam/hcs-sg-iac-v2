@@ -30,8 +30,24 @@ construction.
 
 ## Project files
 
-    groups/web-tier.yaml         # name, description, members: [ip: ...]
-    rules/web-tier.yaml          # security_group, ingress(source:), egress(destination:)
+Per-SG directory layout (the default for new projects and `hcs-sg
+import`): one directory per security group under `security-groups/` —
+the directory name IS the group name, `group.yaml` describes it, and
+each direction is its own file:
+
+    security-groups/web-tier/
+    ├── group.yaml               # name, description, members: [ip: ...]
+    ├── ingress.yaml             # list of {source, protocol, ports}
+    └── egress.yaml              # list of {destination, protocol, ports}
+
+An absent `ingress.yaml`/`egress.yaml` = that direction is UNMANAGED;
+`[]` in the file = managed remove-all. Environments conventionally live
+as sibling subprojects: `hcs-sg plan --project projects/dev` (each with
+its own groups/rules/snapshot/audit).
+
+Legacy flat layout (still read, unchanged): `groups/<name>.yaml` +
+`rules/<name>.yaml` per SG. Mixing both layouts in one project is a
+clean error.
 
 `source`/`destination` = group name or CIDR (`0.0.0.0/0`, bare IPs
 auto-/32). Protocol: tcp|udp|icmp|icmpv6|all. Ports: "80", "22,443",
