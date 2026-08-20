@@ -1,0 +1,9 @@
+# Vendor-blocked: huaweicloudsdkcore 3.1.210 pins pyasn1>=0.5.0,<=0.6.3,
+# so the 0.6.4 fix for these DoS CVEs cannot be installed while the SDK
+# cap stands. Risk accepted: pyasn1 here only parses ASN.1 from OUR OWN
+# TLS-protected responses of the HCS endpoint (no untrusted-input path);
+# impact class is denial-of-service of the CLI itself, not RCE/leak.
+# Re-review when the SDK ships a build without the cap (or by the date).
+CVE-2026-59884
+CVE-2026-59885
+CVE-2026-59886
