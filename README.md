@@ -93,27 +93,23 @@ docs: "Air-Gapped Environment") or simply runs the scan elsewhere.
 
 ## Architecture
 
-Vocabulary and brain leaves over two rings; imports point inward, inner
-rings never know outer ones exist.
+Four small core modules, two thin rings around them; imports only
+point inward — `tach check` and tests/test_architecture.py enforce it.
 
-    entities.py     the DESIRED state — YAML entities + ports grammar
-    snapshot.py     the OBSERVED state — cloud types + snapshot codec
-    contracts.py    the cloud boundary — two Protocols + CloudError
-    engine.py       the brain — resolve · plan · execute · drift,
-                    pure calculation
-    adapters/       the ONLY third-party ring — SDK, PyYAML, snapshots
-    cli/            thin presentation — argv in, tables/JSON out
+    entities.py   what your YAML WANTS — groups, rules, the ports
+                  grammar ("80", "22,443", "8000-9000")
+    snapshot.py   what the cloud HAS — one observation, plus the
+                  snapshot.json read/write
+    contracts.py  the cloud boundary — the read/write method sets any
+                  gateway must offer, and CloudError
+    engine.py     the diff brain — resolve member IPs, plan, execute,
+                  drift; no I/O of its own
+    adapters/     the only files that touch third-party libraries
+                  (PyYAML in yaml_config, the Huawei SDK + tenacity in
+                  huawei_gateway)
+    cli/          argv in, tables and JSON out
 
-Two seams, enforced two ways: **dependency direction** by `tach check`
-(tach.toml — the leaves plus ring-level modules); **per-file
-third-party designation** by tests/test_architecture.py
-(yaml_config→yaml, huawei_gateway→SDK+tenacity; an unregistered
-adapter file FAILS). The cloud boundary is TWO Protocols
-(contracts.py): CloudReader (inventory() is the single read seam +
-find_nics_by_ip) and CloudWriter — ONE prod gateway implements them
-(huawei, SDK); offline planning needs no gateway at all, it loads
-snapshot.json straight into the engine. The tests add an in-memory
-fake that powers the e2e CLI scenarios. Desired state (`Group`/`Rule`) vs observed
-(`CloudSg`/`CloudRule`) join on identity tuples
-`(direction, protocol, ports, remote)`; plan output is ONE ActionList
-carrying both display rows and executable payloads.
+The one idea that explains the core: every rule carries an identity
+tuple `(direction, protocol, ports, remote)`. Your YAML's rules and
+the cloud's rules are matched by that tuple — plan output is ONE
+ActionList that serves both the on-screen preview and the executor.

@@ -1,25 +1,16 @@
 """hcs-sg: security-group-as-code for Huawei Cloud Stack.
 
-Vocabulary and brain leaves over two rings; imports point inward
-(tach.toml enforces it; the per-file third-party designation lives in
-tests/test_architecture.py).
+    entities.py   what the YAML WANTS — groups, rules, ports grammar
+    snapshot.py   what the cloud HAS — one observation + the file
+    contracts.py  the cloud boundary — read/write method sets
+    engine.py     the diff brain — resolve · plan · execute · drift
+    adapters/     the only files touching third-party libraries
+    cli/          argv in, tables and JSON out
 
-    entities.py     the DESIRED state — YAML entities + the ports
-                    grammar + the collect-all Report
-    snapshot.py     the OBSERVED state — CloudSg/CloudRule/CloudNic +
-                    the snapshot.json codec
-    contracts.py    the cloud boundary — CloudReader/CloudWriter
-                    Protocols + CloudError
-    engine.py       the brain — resolve · plan · execute · drift,
-                    pure calculation (only execute touches a gateway,
-                    through the write Protocol)
-
-    adapters/       the ONLY third-party ring — SDK, PyYAML, snapshots
-    cli/            thin presentation — argv in, tables/JSON out
-
-Naming that pays off once seen: Group/Rule (entities) are the DESIRED
-state from YAML; CloudSg/CloudRule/CloudNic (snapshot) are the OBSERVED
-state a gateway returned; engine.plan diffs the two by identity
-tuples and emits one ActionList carrying both the display rows and the
-executable payloads. The full story: README §Architecture.
+The one idea: every rule carries an identity tuple (direction,
+protocol, ports, remote) — the YAML's rules and the cloud's rules are
+matched by it, and engine.plan emits one ActionList that serves both
+the preview and the executor. Imports point inward; tach.toml and
+tests/test_architecture.py enforce it. The full story:
+README §Architecture.
 """
