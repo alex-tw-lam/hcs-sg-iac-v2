@@ -22,19 +22,6 @@ from tests.conftest import (
 P = "--project"
 
 
-def test_validate_ok(project, gw, capsys, monkeypatch):
-    rc, out, _ = run(["validate", P, str(project)], gw, capsys, monkeypatch)
-    assert rc == 0 and "OK: 1 groups" in out and gw.call_log == []
-
-
-def test_validate_errors_on_stderr(project, gw, capsys, monkeypatch):
-    (project / "security-groups" / "web" / "group.yaml").write_text(
-        "name: Web\nmembers: []\n"
-    )
-    rc, out, err = run(["validate", P, str(project)], gw, capsys, monkeypatch)
-    assert rc == 1 and out == "" and "must match" in err
-
-
 def test_plan_is_readonly(project, gw, capsys, monkeypatch):
     rc, out, _ = run(["plan", P, str(project)], gw, capsys, monkeypatch)
     assert rc == 0 and "member" in out and "Dry run" in out

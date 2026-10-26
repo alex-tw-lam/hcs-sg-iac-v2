@@ -13,7 +13,6 @@ Credentials come from the environment only — never from files or flags.
 
 ## Usage
 
-    hcs-sg validate [--project DIR]     # files only, zero cloud calls
     hcs-sg plan                         # diff code vs cloud (read-only)
     hcs-sg apply [--yes]                # dry run unless --yes
     hcs-sg destroy NAME [--yes]         # detach members, delete the SG

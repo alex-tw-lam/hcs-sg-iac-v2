@@ -108,11 +108,6 @@ def build_parser() -> argparse.ArgumentParser:
         dest="command", required=True, parser_class=_ReadOnlyPlanParser
     )
     sub.add_parser(
-        "validate",
-        parents=[common],
-        help="validate files only (no cloud reads)",
-    )
-    sub.add_parser(
         "plan",
         parents=[common, snap],
         help="diff code vs cloud (read-only; never writes)",
@@ -306,8 +301,8 @@ def _resolve_ctx(args, project, gateway) -> "tuple[_Ctx, int | None]":
         ):
             print(
                 "error: HCS_AK / HCS_SK / HCS_PROJECT_ID / HCS_ENDPOINT "
-                "are required for live reads and writes (validate is "
-                "offline; plan can run against --snapshot FILE)",
+                "are required for live reads and writes (plan can run "
+                "offline against --snapshot FILE)",
                 file=sys.stderr,
             )
             return _Ctx(project=project), 1
@@ -331,20 +326,6 @@ def _resolve_ctx(args, project, gateway) -> "tuple[_Ctx, int | None]":
         ),
         None,
     )
-
-
-def _cmd_validate(args, project) -> int:
-    _log.info("phase: validating the project")
-    state, report = yaml_config.load_project(project)
-    if state is None:
-        print("\n".join(report.errors), file=sys.stderr)
-        return 1
-    print(
-        f"OK: {len(state.groups)} groups, "
-        f"{sum(len(rf.ingress) + len(rf.egress) for rf in state.rules.values())} "
-        f"rules — validation passed"
-    )
-    return 0
 
 
 def _cmd_import(args, project) -> int:
@@ -522,8 +503,6 @@ def main(argv=None, gateway=None) -> int:
         _configure_logging()
     project = Path(args.project)
 
-    if args.command == "validate":
-        return _cmd_validate(args, project)
     if args.command == "import":
         return _cmd_import(args, project)
 
