@@ -279,6 +279,7 @@ def _resolve_ctx(args, project, gateway) -> "tuple[_Ctx, int | None]":
             return _Ctx(project=project), 1
         gateway = _build_gateway(config)
     if offline:
+        assert snap_file is not None  # offline ⇒ snap_file was set
         inventory = snapshot_from_json(
             snap_file.read_text(encoding="utf-8")
         )
