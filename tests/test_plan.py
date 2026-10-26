@@ -61,7 +61,7 @@ def test_loader_yaml_syntax_error(tmp_path):
 
 
 def test_dangling_remote_group_ref_rejected(tmp_path):
-    from hcs_sg_iac.cli.main import _plan_project
+    from hcs_sg_iac.cli.main import _Ctx, _plan_project
 
     make_project(
         tmp_path,
@@ -70,7 +70,9 @@ def test_dangling_remote_group_ref_rejected(tmp_path):
             "security-groups/web/ingress.yaml": "- {source: ghost, protocol: tcp, ports: '22'}\n",
         },
     )
-    al, errors = _plan_project(FakeGateway(), tmp_path)
+    al, errors = _plan_project(
+        _Ctx(project=tmp_path, gateway=FakeGateway())
+    )
     assert al is None
     assert any("ghost" in e for e in errors)
 
@@ -333,7 +335,7 @@ def test_empty_groups_refuses_whole_estate_deletion(tmp_path):
     """security-groups/ present but empty, cloud non-empty: refuse."""
     (tmp_path / "security-groups").mkdir()
     gw = seed(FakeGateway(), sgs=(("sg-1", "web", "web"),))
-    from hcs_sg_iac.cli.main import _plan_project
+    from hcs_sg_iac.cli.main import _Ctx, _plan_project
 
-    al, errors = _plan_project(gw, tmp_path)
+    al, errors = _plan_project(_Ctx(project=tmp_path, gateway=gw))
     assert al is None and any("refusing" in e for e in errors)

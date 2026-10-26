@@ -13,10 +13,13 @@ from pathlib import Path
 
 from hcs_sg_iac import engine
 from hcs_sg_iac.adapters import yaml_config
-from hcs_sg_iac.adapters.snapshot_gateway import SnapshotGateway
 from hcs_sg_iac.cli import render
-from hcs_sg_iac.contracts import CloudError, CloudGateway, CloudReader
-from hcs_sg_iac.snapshot import snapshot_from_json, snapshot_to_json
+from hcs_sg_iac.contracts import CloudError, CloudGateway
+from hcs_sg_iac.snapshot import (
+    Inventory,
+    snapshot_from_json,
+    snapshot_to_json,
+)
 
 _log = logging.getLogger("hcs_sg_iac.cli")  # --verbose: wired below
 
@@ -215,13 +218,13 @@ def _commit(ctx, al, args) -> int:
 @dataclass(frozen=True)
 class _Ctx:
     """What the cloud-command handlers share: the project dir, the
-    gateway (real SDK or injected), the reader the engine sees (a
-    SnapshotGateway when planning offline), and the snapshot provenance
-    the post-write staleness note needs."""
+    gateway (real SDK or injected), the observed state when planning
+    offline (a snapshot file loaded verbatim — replay IS loading it),
+    and the snapshot provenance the post-write staleness note needs."""
 
     project: Path
     gateway: "CloudGateway | None" = None
-    readers: "CloudReader | None" = None
+    inventory: "Inventory | None" = None
     snap_arg: "str | None" = None
     snap_file: "Path | None" = None
     auto: bool = False
@@ -275,7 +278,12 @@ def _resolve_ctx(args, project, gateway) -> "tuple[_Ctx, int | None]":
             )
             return _Ctx(project=project), 1
         gateway = _build_gateway(config)
-    readers = SnapshotGateway(snap_file) if offline else gateway
+    if offline:
+        inventory = snapshot_from_json(
+            snap_file.read_text(encoding="utf-8")
+        )
+    else:
+        inventory = None
     if auto and args.command != "drift":
         print(
             "hcs-sg: planning from snapshot.json (offline) — refresh "
@@ -286,7 +294,7 @@ def _resolve_ctx(args, project, gateway) -> "tuple[_Ctx, int | None]":
         _Ctx(
             project=project,
             gateway=gateway,
-            readers=readers,
+            inventory=inventory,
             snap_arg=snap_arg,
             snap_file=snap_file,
             auto=auto,
@@ -424,12 +432,13 @@ def _cmd_snapshot(args, ctx: _Ctx) -> int:
     return 0
 
 
-def _plan_project(readers: "CloudReader", project: Path):
+def _plan_project(ctx: _Ctx):
     """Load → resolve → plan, the workflow the old pipeline module
-    owned. Returns (ActionList, []) on success or (None, error lines);
-    engine errors (duplicate cloud names, the whole-estate guard)
-    surface as clean lines, never tracebacks."""
-    state, report = yaml_config.load_project(project)
+    owned. The observed state: the offline inventory when present,
+    else ONE live read. Returns (ActionList, []) on success or (None,
+    error lines); engine errors (duplicate cloud names, the
+    whole-estate guard) surface as clean lines, never tracebacks."""
+    state, report = yaml_config.load_project(ctx.project)
     if state is None:
         return None, list(report.errors)
     try:
@@ -437,7 +446,11 @@ def _plan_project(readers: "CloudReader", project: Path):
             "phase: reading the observed state, resolving %d member IPs",
             sum(len(g.members) for g in state.groups.values()),
         )
-        inventory = readers.inventory()
+        inventory = ctx.inventory
+        if inventory is None:
+            if ctx.gateway is None:  # _resolve_ctx guarantees one
+                return None, ["error: no gateway for a live read"]
+            inventory = ctx.gateway.inventory()
         resolution = engine.resolve_memberships(inventory.nics_by_ip, state)
         if not resolution.report.ok:
             return None, list(resolution.report.errors)
@@ -449,9 +462,9 @@ def _plan_project(readers: "CloudReader", project: Path):
 
 
 def _cmd_plan_apply(args, ctx: _Ctx) -> int:
-    if ctx.readers is None:  # _resolve_ctx guarantees it for plan/apply
+    if ctx.inventory is None and ctx.gateway is None:
         return 1
-    planned, errors = _plan_project(ctx.readers, ctx.project)
+    planned, errors = _plan_project(ctx)
     if planned is None:
         print("\n".join(errors), file=sys.stderr)
         return 1

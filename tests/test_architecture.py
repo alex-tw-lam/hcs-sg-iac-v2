@@ -25,7 +25,6 @@ ADAPTER_THIRD_PARTY = {
         "huaweicloudsdkvpc",
         "tenacity",
     },
-    "snapshot_gateway.py": set(),
     "__init__.py": set(),
 }
 ALLOWED_INTERNAL = {"hcs_sg_iac"}

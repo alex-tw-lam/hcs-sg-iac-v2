@@ -1,11 +1,10 @@
 # hcs_sg_iac/contracts.py
 """The cloud boundary: two Protocols + the domain error. The read side
-is ONE seam — inventory() gives the whole observed cloud in a single
-pass (every gateway implements it; it replaced the per-SG read loop and
-the five-protocol sprawl) plus the member-IP lookup resolution needs.
-The write side stays segregated: apply additionally needs the writers.
-Any gateway (real SDK, in-memory fake, snapshot replay) is
-substitutable (LSP)."""
+is one call — inventory() returns the whole observed cloud in a single
+pass, plus a member-IP lookup. The write side is separate: apply
+additionally needs the writers. Any object implementing these (the
+real SDK gateway, the in-memory test fake) can stand in for any
+other."""
 
 from typing import Protocol
 

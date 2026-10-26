@@ -14,9 +14,9 @@ def _write_and_plan(tmp_path, gw):
     for n, g in imp.groups.items():
         files.update(yaml_config.dump_security_group_dir(g, imp.rules.get(n)))
     root = make_project(tmp_path, files)
-    from hcs_sg_iac.cli.main import _plan_project
+    from hcs_sg_iac.cli.main import _Ctx, _plan_project
 
-    al, errors = _plan_project(gw, root)
+    al, errors = _plan_project(_Ctx(project=root, gateway=gw))
     assert al is not None, errors
     return imp, al
 

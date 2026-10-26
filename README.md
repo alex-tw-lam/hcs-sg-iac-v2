@@ -110,10 +110,10 @@ third-party designation** by tests/test_architecture.py
 (yaml_config→yaml, huawei_gateway→SDK+tenacity; an unregistered
 adapter file FAILS). The cloud boundary is TWO Protocols
 (contracts.py): CloudReader (inventory() is the single read seam +
-find_nics_by_ip) and CloudWriter. Two interchangeable gateways
-implement them in the prod package — huawei (SDK) and snapshot replay
-(offline planning); the tests add an in-memory fake that powers the
-e2e CLI scenarios. Desired state (`Group`/`Rule`) vs observed
+find_nics_by_ip) and CloudWriter — ONE prod gateway implements them
+(huawei, SDK); offline planning needs no gateway at all, it loads
+snapshot.json straight into the engine. The tests add an in-memory
+fake that powers the e2e CLI scenarios. Desired state (`Group`/`Rule`) vs observed
 (`CloudSg`/`CloudRule`) join on identity tuples
 `(direction, protocol, ports, remote)`; plan output is ONE ActionList
 carrying both display rows and executable payloads.
