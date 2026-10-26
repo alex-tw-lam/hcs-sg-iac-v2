@@ -4,7 +4,8 @@
     snapshot.py   what the cloud HAS — one observation + the file
     contracts.py  the cloud boundary — read/write method sets
     engine.py     the diff brain — resolve · plan · execute · drift
-    adapters/     the only files touching third-party libraries
+    adapters/     the third-party ring — PyYAML, the Huawei SDK
+                  (the entities/snapshot leaves carry pydantic)
     cli/          argv in, tables and JSON out
 
 The one idea: every rule carries an identity tuple (direction,

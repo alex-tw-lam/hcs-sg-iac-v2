@@ -1,13 +1,21 @@
 # hcs_sg_iac/entities.py
 """The desired-state vocabulary: the ports grammar, the remote ends of
-a rule, the collect-all Report, and the YAML entities themselves. The
-types ARE the schema: from-dict constructors validate everything and
-report ALL violations into the Report."""
+a rule, the collect-all Report, and the YAML entities themselves.
+Pydantic owns the types (frozen, coercing, equality); the loaders
+collect EVERY violation into the Report with one line per problem —
+validation never fails fast."""
 
 import ipaddress
 import re
-from dataclasses import dataclass
-from typing import cast
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 # ---- the collect-all report ----
 
@@ -29,20 +37,24 @@ class Report:
 # ---- the far end of a rule: another group, or a canonical v4 CIDR ----
 
 
-@dataclass(frozen=True)
-class RemoteGroup:
+class RemoteGroup(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     name: str
 
 
-@dataclass(frozen=True)
-class RemoteCidr:
+class RemoteCidr(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     cidr: str
 
-    def __post_init__(self):
-        net = ipaddress.ip_network(self.cidr, strict=False)
+    @field_validator("cidr", mode="before")
+    @classmethod
+    def _canonical_v4(cls, v):
+        net = ipaddress.ip_network(v, strict=False)
         if net.version != 4:
-            raise ValueError(f"IPv6 is not supported: {self.cidr!r}")
-        object.__setattr__(self, "cidr", str(net))
+            raise ValueError(f"IPv6 is not supported: {v!r}")
+        return str(net)
 
 
 Remote = RemoteGroup | RemoteCidr
@@ -90,7 +102,7 @@ class PortError(Exception):
 class PortSet(str):
     """A canonical ports spec. Subclasses str so it serialises, compares
     and displays as the canonical string everywhere (snapshot JSON,
-    identity tuples, frame expectations) while owning the grammar ops."""
+    identity tuples) while owning the grammar ops."""
 
     __slots__ = ()
 
@@ -106,10 +118,9 @@ class PortSet(str):
         return int(lo_s), int(hi_s or lo_s)
 
 
-@dataclass(frozen=True)
 class _Range:
-    lo: int
-    hi: int
+    def __init__(self, lo, hi):
+        self.lo, self.hi = lo, hi
 
 
 def _parse_entry(raw: str, field: str) -> _Range:
@@ -188,120 +199,174 @@ PROTOCOLS = ("tcp", "udp", "icmp", "icmpv6", "all")
 _NO_PORTS_PROTOCOLS = ("icmp", "icmpv6", "all")
 
 
-@dataclass(frozen=True)
-class Member:
+class Member(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     ip: str
 
+    @field_validator("ip", mode="before")
+    @classmethod
+    def _valid_v4(cls, v):
+        if not isinstance(v, str):
+            raise ValueError("ip must be a string")
+        try:
+            addr = ipaddress.ip_address(v)
+        except ValueError:
+            raise ValueError(f"ip {v!r} is not a valid address") from None
+        if addr.version != 4:
+            raise ValueError(f"ip {v!r}: IPv6 is not supported")
+        return str(addr)  # canonical spelling
 
-@dataclass(frozen=True)
-class Group:
+    @model_validator(mode="before")
+    @classmethod
+    def _must_be_mapping_with_ip(cls, d):
+        if not isinstance(d, dict) or "ip" not in d:
+            raise ValueError("member must be a mapping with an 'ip' key")
+        return d
+
+
+class Group(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     name: str
-    description: str
-    members: tuple  # tuple[Member, ...]
+    description: str = ""
+    members: tuple[Member, ...] = ()
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _name_shape(cls, v):
+        if not isinstance(v, str):
+            raise ValueError(f"name must be a string, got {v!r}")
+        if looks_like_ip(v):
+            raise ValueError(f"name {v!r} must not look like an IP/CIDR")
+        if not GROUP_NAME_RE.fullmatch(v):
+            raise ValueError(f"name {v!r} must match {GROUP_NAME_RE.pattern}")
+        return v
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _description_str(cls, v):
+        if not isinstance(v, str):
+            raise ValueError("description must be a string")
+        return v
+
+    @field_validator("members", mode="before")
+    @classmethod
+    def _members_list(cls, v):
+        # the loader hands a YAML list, the importer a tuple — both are
+        # fine; anything else is not
+        if not isinstance(v, (list, tuple)):
+            raise ValueError("members must be a list")
+        return v
+
+    @model_validator(mode="after")
+    def _no_duplicate_ips(self):
+        seen = set()
+        for m in self.members:
+            if m.ip in seen:
+                raise ValueError(f"duplicate ip {m.ip} in group")
+            seen.add(m.ip)
+        return self
 
 
-@dataclass(frozen=True)
-class Rule:
+class Rule(BaseModel):
+    # PortSet is a str subclass pydantic can't schema — the before
+    # validator hands core an instance, and arbitrary_types_allowed
+    # makes core accept it by isinstance
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
     direction: str  # "ingress" | "egress"
     protocol: str
-    ports: "PortSet | None"  # canonical form; None = all ports
-    remote: Remote
+    ports: "PortSet | None" = None  # canonical form; None = all ports
+    remote: "RemoteGroup | RemoteCidr"
 
-    def __post_init__(self):
+    @field_validator("ports", mode="before")
+    @classmethod
+    def _coerce_portset(cls, v):
         # hand-constructed rules (tests, importer) carry plain strings;
-        # the grammar ops (.entries/.bounds) live on PortSet
-        if isinstance(self.ports, str):
-            object.__setattr__(self, "ports", PortSet(self.ports))
+        # the grammar ops (.entries/.bounds) live on PortSet — no
+        # validation here, the rule loaders run parse_ports themselves
+        if isinstance(v, str):
+            return PortSet(v)
+        return v
 
     def identity(self) -> tuple:
         return (self.direction, self.protocol, self.ports, self.remote)
 
 
-@dataclass(frozen=True)
-class RulesFile:
+class RulesFile(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     security_group: str
-    ingress: tuple  # tuple[Rule, ...]
-    egress: tuple
+    ingress: "tuple[Rule, ...]" = ()
+    egress: "tuple[Rule, ...]" = ()
     ingress_managed: bool  # section present (even if [])
     egress_managed: bool
 
 
-@dataclass(frozen=True)
-class DesiredState:
-    groups: dict  # name -> Group
-    rules: dict  # name -> RulesFile (only groups WITH a rules file)
+class DesiredState(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    groups: "dict[str, Group]" = {}  # name -> Group
+    rules: "dict[str, RulesFile]" = {}  # only groups WITH a rules file
 
 
-def parse_group(d, where: str, report: Report) -> Group | None:
-    """Parse one groups/<name>.yaml document (a plain dict)."""
+_GROUP_ADAPTER = TypeAdapter(Group)
+
+
+def _msg(err) -> str:
+    """One pydantic error -> the message line (custom ValueErrors carry
+    the exact hand-written text)."""
+    return err["msg"].removeprefix("Value error, ")
+
+
+def _nested(err) -> str:
+    """The nested part of a pydantic error location: list indices
+    render as members[3] — exactly the loaders' where-format. A
+    top-level field adds nothing (those report at file level)."""
+    parts = list(err["loc"])
+    for i, p in enumerate(parts):
+        if isinstance(p, int):
+            return parts[i - 1] + f"[{p}]" if i else f"[{p}]"
+    return ""
+
+
+def parse_group(d, where: str, report: Report) -> "Group | None":
+    """Parse one groups/<name>.yaml document (a plain dict); every
+    violation is collected, none fail fast."""
     if not isinstance(d, dict):
         report.error(where, "group file must be a YAML mapping")
         return None
-    name = d.get("name")
-    if not isinstance(name, str):
-        report.error(where, f"name must be a string, got {name!r}")
-        name = None
-    elif looks_like_ip(name):
-        report.error(where, f"name {name!r} must not look like an IP/CIDR")
-        name = None
-    elif not GROUP_NAME_RE.fullmatch(name):
-        report.error(
-            where, f"name {name!r} must match {GROUP_NAME_RE.pattern}"
-        )
-        name = None
-    description = d.get("description", "")
-    ok = True
-    if not isinstance(description, str):
-        report.error(where, "description must be a string")
-        description = ""
-        ok = False
-    members, seen = [], set()
-    raw_members = d.get("members", [])
-    if not isinstance(raw_members, list):
-        report.error(where, "members must be a list")
-        raw_members = []
-        ok = False
-    for i, m in enumerate(raw_members):
-        mwhere = f"{where}: members[{i}]"
-        if not isinstance(m, dict) or "ip" not in m:
-            report.error(mwhere, "member must be a mapping with an 'ip' key")
-            ok = False
-            continue
-        ip = m["ip"]
-        if not isinstance(ip, str):
-            report.error(mwhere, "ip must be a string")
-            ok = False
-            continue
-        try:
-            ip_obj = ipaddress.ip_address(ip)
-        except ValueError:
-            report.error(mwhere, f"ip {ip!r} is not a valid address")
-            ok = False
-            continue
-        if ip_obj.version != 4:
-            report.error(mwhere, f"ip {ip!r}: IPv6 is not supported")
-            ok = False
-            continue
-        ip = str(
-            ip_obj
-        )  # canonical spelling: duplicate check is address-based
-        if ip in seen:
-            report.error(mwhere, f"duplicate ip {ip} in group")
-            ok = False
-            continue
-        seen.add(ip)
-        members.append(Member(ip=ip))
-    if name is None:
-        ok = False
-    return (
-        Group(
-            name=cast(str, name),
-            description=description,
-            members=tuple(members),
-        )
-        if ok
-        else None
-    )
+    try:
+        return _GROUP_ADAPTER.validate_python(d)
+    except ValidationError as e:
+        for err in e.errors():
+            nested = _nested(err)
+            report.error(f"{where}: {nested}" if nested else where, _msg(err))
+        return None
+
+
+class _RuleShape(BaseModel):
+    """The protocol/ports half of one rule mapping (the remote half is
+    resolved by the loader — its error text names the source/
+    destination key, which is per-direction)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    protocol: str
+    ports: object = None
+
+    @field_validator("protocol", mode="before")
+    @classmethod
+    def _known_protocol(cls, v):
+        if v not in PROTOCOLS:
+            raise ValueError(
+                f"protocol must be one of {PROTOCOLS}, got {v!r}"
+            )
+        return v
+
+
+_RULE_SHAPE = TypeAdapter(_RuleShape)
 
 
 def parse_rule_list(
@@ -341,14 +406,13 @@ def parse_rule_list(
                 rwhere, f"{remote_key} {remote_raw!r} is not a valid CIDR"
             )
             continue
-        protocol = rd.get("protocol")
-        if protocol not in PROTOCOLS:
-            report.error(
-                rwhere,
-                f"protocol must be one of {PROTOCOLS}, got {protocol!r}",
-            )
+        try:
+            shape = _RULE_SHAPE.validate_python(rd)
+        except ValidationError as e:
+            for err in e.errors():
+                report.error(rwhere, _msg(err))
             continue
-        ports_raw = rd.get("ports")
+        protocol, ports_raw = shape.protocol, shape.ports
         if protocol in _NO_PORTS_PROTOCOLS and ports_raw not in (None, "", []):
             report.error(rwhere, f"{protocol} rules must not have ports")
             continue

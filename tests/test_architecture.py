@@ -18,6 +18,13 @@ STDLIB = sys.stdlib_module_names
 RINGS = ("adapters", "cli")
 LEAVES = ("contracts.py", "entities.py", "engine.py", "snapshot.py", "__init__.py")
 
+# the vocabulary leaves carry pydantic deliberately (the validated
+# types); everything else in the leaves stays stdlib+internal.
+LEAF_THIRD_PARTY = {
+    "entities.py": {"pydantic"},
+    "snapshot.py": {"pydantic"},
+}
+
 ADAPTER_THIRD_PARTY = {
     "yaml_config.py": {"yaml"},
     "huawei_gateway.py": {
@@ -73,17 +80,22 @@ def _id(p):
 
 @pytest.mark.parametrize("path", _ALL, ids=_id)
 def test_third_party_imports_are_designated(path):
-    """Stdlib + hcs_sg_iac everywhere; adapters additionally only their
-    registered third-party lib (an unregistered adapter file FAILS)."""
+    """Stdlib + hcs_sg_iac everywhere; adapters and the pydantic leaves
+    additionally only their registered third-party libs (an
+    unregistered file FAILS — additions are deliberate)."""
     roots = _roots(path) - STDLIB - ALLOWED_INTERNAL
-    allowed = (
-        ADAPTER_THIRD_PARTY.get(path.name)
-        if path.parent.name == "adapters"
-        else set()
-    )
+    if path.parent.name == "adapters":
+        allowed = ADAPTER_THIRD_PARTY.get(path.name)
+        unregistered = f"adapters/{path.name}"
+    elif path.parent.name == "hcs_sg_iac":
+        allowed = LEAF_THIRD_PARTY.get(path.name, set())
+        unregistered = f"hcs_sg_iac/{path.name}"
+    else:  # cli — the outermost ring, stdlib+internal only
+        allowed = set()
+        unregistered = f"cli/{path.name}"
     assert allowed is not None, (
-        f"adapters/{path.name} is unregistered — add it to "
-        f"ADAPTER_THIRD_PARTY deliberately"
+        f"{unregistered} is unregistered — add it to the third-party "
+        f"registry deliberately"
     )
     assert (
         roots <= allowed

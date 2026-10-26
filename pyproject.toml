@@ -5,6 +5,7 @@ description = "Security-group-as-code CLI for HCS 8.5.1 (validate / plan / apply
 requires-python = ">=3.11"
 dependencies = [
     "PyYAML>=6.0",
+    "pydantic>=2.7",
     "tenacity>=8.3",
     "huaweicloudsdkvpc==3.1.210",
 ]

@@ -85,8 +85,12 @@ def test_resolve_zero_and_multi_match(tmp_path):
 
     state = DesiredState(
         groups={
-            "web": Group("web", "", (Member(ip="10.9.9.9"),)),
-            "db": Group("db", "", (Member(ip="10.0.2.20"),)),
+            "web": Group(
+                name="web", description="", members=(Member(ip="10.9.9.9"),)
+            ),
+            "db": Group(
+                name="db", description="", members=(Member(ip="10.0.2.20"),)
+            ),
         },
         rules={},
     )

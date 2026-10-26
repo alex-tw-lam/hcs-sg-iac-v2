@@ -3,35 +3,38 @@
 
 These are OUR nouns (nic, sg, rule) — adapters translate SDK objects
 into these; nothing inner ever sees the SDK. Snapshot carries the
-invariant every reader needs (each sg id keyed in rules/attached) in
-__post_init__; Inventory bundles a Snapshot with the member-IP NIC
-index into the single type behind every inventory()/snapshot-file
-parse. snapshot_to_json/from_json (de)serialise the file format of
-`hcs-sg snapshot` and the input of offline planning."""
+invariant every reader needs (each sg id keyed in rules/attached); the
+Inventory bundle adds the member-IP NIC index behind every
+inventory()/snapshot-file parse. snapshot_to_json/from_json
+(de)serialise the file format of `hcs-sg snapshot` and the input of
+offline planning."""
 
 import json
-from dataclasses import asdict, dataclass, field
 from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from hcs_sg_iac.entities import RemoteCidr, RemoteGroup
 
 
-@dataclass(frozen=True)
-class CloudSg:
+class CloudSg(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     id: str
     name: str
     description: str = ""
 
 
-@dataclass(frozen=True)
-class CloudRule:
+class CloudRule(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     id: str
     sg_id: str
     direction: "Literal['ingress', 'egress']"
-    protocol: str | None  # None = all protocols
+    protocol: "str | None"  # None = all protocols
     ports: "str | None"  # canonical PortSet form; None = all ports
-    remote_group_id: str | None
-    remote_ip_prefix: str | None
+    remote_group_id: "str | None"
+    remote_ip_prefix: "str | None"
 
     def identity(self, id_to_name: "dict | None" = None) -> tuple:
         """The join key against code rules — the SAME tuple shape as
@@ -58,61 +61,69 @@ class CloudRule:
         return (self.direction, self.protocol or "all", self.ports, remote)
 
 
-@dataclass(frozen=True)
-class CloudNic:
+class CloudNic(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     port_id: str
     ip: str
-    vm_name: str | None = None
+    vm_name: "str | None" = None
 
 
-@dataclass(frozen=True)
-class Snapshot:
-    sgs: tuple = field(default_factory=tuple)  # tuple[CloudSg, ...]
-    rules: dict = field(default_factory=dict)  # sg_id -> [CloudRule]
-    attached: dict = field(default_factory=dict)  # sg_id -> [CloudNic]
+class Snapshot(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
-    def __post_init__(self):
-        # The invariant the readers used to maintain with per-adapter
-        # normalisation loops: EVERY sg id is keyed in rules/attached
-        # (an empty list when there is nothing) — so .get(id, []) and
-        # [id] are both safe downstream.
-        rules = dict(self.rules)
-        attached = dict(self.attached)
-        for sg in self.sgs:
+    sgs: "tuple[CloudSg, ...]" = ()
+    rules: dict = {}  # sg_id -> [CloudRule]
+    attached: dict = {}  # sg_id -> [CloudNic]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _key_every_sg(cls, d):
+        """The invariant the readers used to maintain with per-adapter
+        normalisation loops: EVERY sg id is keyed in rules/attached (an
+        empty list when there is nothing) — so .get(id, []) and [id]
+        are both safe downstream."""
+        if not isinstance(d, dict):
+            return d
+        d = dict(d)
+        rules = dict(d.get("rules") or {})
+        attached = dict(d.get("attached") or {})
+        for sg in d.get("sgs") or ():
             rules.setdefault(sg.id, [])
             attached.setdefault(sg.id, [])
-        object.__setattr__(self, "rules", rules)
-        object.__setattr__(self, "attached", attached)
+        d["rules"], d["attached"] = rules, attached
+        return d
 
 
-@dataclass(frozen=True)
-class Inventory:
+class Inventory(BaseModel):
     """One observed cloud: the Snapshot triples plus the member-IP NIC
     index (what find_nics_by_ip returned) — the type every
     inventory()-capable gateway and every snapshot-file parse hands
     back, instead of a bare (Snapshot, dict) tuple."""
 
-    snapshot: Snapshot = field(default_factory=Snapshot)
-    nics_by_ip: dict = field(default_factory=dict)  # ip -> [CloudNic]
+    model_config = ConfigDict(frozen=True)
+
+    snapshot: Snapshot = Snapshot()
+    nics_by_ip: dict = {}  # ip -> [CloudNic]
 
 
 def snapshot_to_json(
     sgs, rules: dict, attached: dict, nics_by_ip: dict
 ) -> str:
     """Serialise an inventory: the Snapshot triples plus the member-IP
-    NIC index (what find_nics_by_ip returned) — offline resolution
+    NIC index (what the live read returned) — offline resolution
     needs it."""
     return json.dumps(
         {
-            "sgs": [asdict(s) for s in sgs],
+            "sgs": [s.model_dump() for s in sgs],
             "rules": {
-                sid: [asdict(r) for r in rs] for sid, rs in rules.items()
+                sid: [r.model_dump() for r in rs] for sid, rs in rules.items()
             },
             "attached": {
-                sid: [asdict(n) for n in ns] for sid, ns in attached.items()
+                sid: [n.model_dump() for n in ns] for sid, ns in attached.items()
             },
             "nics_by_ip": {
-                ip: [asdict(n) for n in ns] for ip, ns in nics_by_ip.items()
+                ip: [n.model_dump() for n in ns] for ip, ns in nics_by_ip.items()
             },
         },
         indent=2,

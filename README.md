@@ -104,9 +104,9 @@ point inward — `tach check` and tests/test_architecture.py enforce it.
                   gateway must offer, and CloudError
     engine.py     the diff brain — resolve member IPs, plan, execute,
                   drift; no I/O of its own
-    adapters/     the only files that touch third-party libraries
-                  (PyYAML in yaml_config, the Huawei SDK + tenacity in
-                  huawei_gateway)
+    adapters/     the third-party ring — PyYAML here, the Huawei
+                  SDK + tenacity there (the entities/snapshot leaves
+                  carry pydantic)
     cli/          argv in, tables and JSON out
 
 The one idea that explains the core: every rule carries an identity
