@@ -18,8 +18,11 @@ RINGS = ("model", "usecases", "adapters", "cli")
 
 ADAPTER_THIRD_PARTY = {
     "yaml_config.py": {"yaml"},
-    "huawei_gateway.py": {"huaweicloudsdkcore", "huaweicloudsdkvpc"},
-    "ratelimit.py": set(),
+    "huawei_gateway.py": {
+        "huaweicloudsdkcore",
+        "huaweicloudsdkvpc",
+        "tenacity",
+    },
     "fake_gateway.py": set(),
     "snapshot_gateway.py": set(),
     "__init__.py": set(),
@@ -28,8 +31,8 @@ ALLOWED_INTERNAL = {"hcs_sg_iac"}
 
 
 # model imports itself; usecases add themselves; adapters add themselves
-# (huawei_gateway imports ratelimit — same ring, allowed); cli, the
-# outermost ring, may import anything in the package.
+# (same-ring imports allowed by construction); cli, the outermost ring,
+# may import anything in the package.
 def _package_of(path: pathlib.Path) -> str:
     """Containing package of a module file, as a dotted path
     (…/hcs_sg_iac/usecases/x.py -> hcs_sg_iac.usecases)."""

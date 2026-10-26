@@ -1,7 +1,7 @@
 # hcs_sg_iac/model/common.py
 """The model's leaf vocabulary in one file: the collect-all Report, the
-domain errors (both rate errors carry a retry_at window deadline), and
-the far end of a rule (another group, or a canonical v4 CIDR)."""
+domain error, and the far end of a rule (another group, or a canonical
+v4 CIDR)."""
 
 import ipaddress
 from dataclasses import dataclass
@@ -22,23 +22,8 @@ class Report:
 
 
 class CloudError(Exception):
-    """Unretryable cloud/API failure (one clean line, no traceback)."""
-
-
-class _RateLimited(Exception):
-    """Shared shape: a retry deadline for wait-and-continue."""
-
-    def __init__(self, message, retry_at=None):
-        super().__init__(message)
-        self.retry_at = retry_at
-
-
-class QuotaExhausted(_RateLimited):
-    """OUR limiter's window is spent (not the cloud's)."""
-
-
-class CloudThrottled(_RateLimited):
-    """The cloud itself throttled us (429): halve our slice."""
+    """Cloud/API failure after any in-place retries (one clean line, no
+    traceback)."""
 
 
 @dataclass(frozen=True)

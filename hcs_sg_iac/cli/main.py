@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +15,7 @@ from hcs_sg_iac.adapters import yaml_config
 from hcs_sg_iac.adapters.snapshot_gateway import SnapshotGateway
 from hcs_sg_iac.cli import render
 from hcs_sg_iac.model.cloud import snapshot_from_json, snapshot_to_json
-from hcs_sg_iac.model.common import CloudError, CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.common import CloudError
 from hcs_sg_iac.model.gateway import CloudGateway, CloudReader
 from hcs_sg_iac.usecases import drift as drift_uc
 from hcs_sg_iac.usecases import importer, pipeline
@@ -33,14 +32,9 @@ class Config:
     hcs_endpoint: str
     ca_bundle: str = ""
     ssl_verify: bool = True
-    budget: int = 25
 
 
 def load_config() -> Config:
-    try:
-        budget = int(os.environ.get("SERVICE_CALL_BUDGET", "25"))
-    except ValueError:  # non-numeric env → safe default
-        budget = 25
     return Config(
         hcs_ak=os.environ.get("HCS_AK", ""),
         hcs_sk=os.environ.get("HCS_SK", ""),
@@ -48,7 +42,6 @@ def load_config() -> Config:
         hcs_endpoint=os.environ.get("HCS_ENDPOINT", ""),
         ca_bundle=os.environ.get("CA_BUNDLE", ""),
         ssl_verify=os.environ.get("SSL_VERIFY", "true").lower() == "true",
-        budget=budget,
     )
 
 
@@ -187,29 +180,22 @@ def _build_gateway(config: Config):
     return huawei_gateway.build_gateway(config)
 
 
-def _print_plan(al, *, quota, args, executed=None) -> None:
+def _print_plan(al, *, args, executed=None) -> None:
     if args.json:
-        print(render.render_json(al, quota=quota, executed=executed))
+        print(render.render_json(al, executed=executed))
     else:
         print(
             render.render_plan(
-                al, quota=quota, executed=executed, dry_run=executed is None
+                al, executed=executed, dry_run=executed is None
             )
         )
 
 
-def _print_preview(gateway, al, args) -> None:
+def _print_preview(al, args) -> None:
     """The plan table shown before the writes (--yes IS the consent).
     Under --json the preview goes to stderr so stdout stays pure."""
-    table = render.render_plan(
-        al, quota=pipeline.quota(gateway, al.actions), dry_run=False
-    )
+    table = render.render_plan(al, dry_run=False)
     print(table, file=sys.stderr if args.json else sys.stdout)
-
-
-def _notify(msg: str) -> None:
-    """Wait-and-continue notices go to stderr so --json stdout stays pure."""
-    print(f"hcs-sg: {msg}", file=sys.stderr)
 
 
 def _snapshot_stale_note(snap_arg) -> None:
@@ -226,19 +212,11 @@ def _snapshot_stale_note(snap_arg) -> None:
 
 def _commit(ctx, al, args) -> int:
     """Shared write tail for apply --yes and destroy --yes: preview
-    first, then execute (--yes IS the consent; rate exhaustion waits out
-    the window and continues, notice on stderr; --json stdout stays
+    first, then execute (--yes IS the consent; --json stdout stays
     pure), the end-of-run table, and the snapshot staleness note."""
-    _print_preview(ctx.gateway, al, args)
-    results = pipeline.execute_confirmed(
-        ctx.gateway, al, sleep=time.sleep, notify=_notify
-    )
-    _print_plan(
-        al,
-        quota=pipeline.quota(ctx.gateway, al.actions),
-        args=args,
-        executed=results,
-    )
+    _print_preview(al, args)
+    results = pipeline.execute_confirmed(ctx.gateway, al)
+    _print_plan(al, args=args, executed=results)
     _snapshot_stale_note(ctx.stale_note_source())
     return 0 if all(r.status == "ok" for r in results) else 1
 
@@ -457,9 +435,7 @@ def _cmd_snapshot(args, ctx: _Ctx) -> int:
 def _cmd_destroy(args, ctx: _Ctx) -> int:
     if ctx.readers is None:  # _resolve_ctx guarantees it for destroy
         return 1
-    al = pipeline.plan_destroy_project(
-        ctx.readers, args.name, sleep=time.sleep, notify=_notify
-    )
+    al = pipeline.plan_destroy_project(ctx.readers, args.name)
     if not al.actions:
         print(
             f"error: no cloud security group named {args.name!r}",
@@ -467,9 +443,7 @@ def _cmd_destroy(args, ctx: _Ctx) -> int:
         )
         return 1
     if not ctx.yes:
-        _print_plan(
-            al, quota=pipeline.quota(ctx.readers, al.actions), args=args
-        )
+        _print_plan(al, args=args)
         return 0
     return _commit(ctx, al, args)
 
@@ -481,18 +455,12 @@ def _cmd_plan_apply(args, ctx: _Ctx) -> int:
         yaml_config.load_project,
         ctx.readers,
         ctx.project,
-        sleep=time.sleep,
-        notify=_notify,
     )
     if planned is None:
         print("\n".join(errors), file=sys.stderr)
         return 1
     if args.command == "plan" or not ctx.yes:
-        _print_plan(
-            planned,
-            quota=pipeline.quota(ctx.readers, planned.actions),
-            args=args,
-        )
+        _print_plan(planned, args=args)
         return 0
     return _commit(ctx, planned, args)
 
@@ -509,9 +477,9 @@ def main(argv=None, gateway=None) -> int:
     ctx, rc = _resolve_ctx(args, project, gateway)
     if rc is not None:
         return rc
-    # Everything below touches a gateway: rate exhaustion waits out the
-    # window and continues; anything unretryable that still escapes is
-    # ONE clean error line, never a traceback.
+    # Everything below touches a gateway: throttled calls wait and retry
+    # inside it; anything that still escapes is ONE clean error line,
+    # never a traceback.
     try:
         handlers = {
             "drift": _cmd_drift,
@@ -521,6 +489,6 @@ def main(argv=None, gateway=None) -> int:
             "apply": _cmd_plan_apply,
         }
         return handlers[args.command](args, ctx)
-    except (CloudError, CloudThrottled, QuotaExhausted) as e:
+    except CloudError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

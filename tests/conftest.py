@@ -2,13 +2,10 @@
 """The lean suite's shared fixtures: a per-SG-directory project on disk,
 a seeded FakeGateway, and the run() harness every CLI scenario uses."""
 
-import time
-
 import pytest
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.cli.main import main
 from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg
-from hcs_sg_iac.model.common import QuotaExhausted
 from hcs_sg_iac.usecases.plan import plan, read_snapshot
 from hcs_sg_iac.usecases.resolve import resolve_memberships
 
@@ -38,14 +35,11 @@ def seed(gw, sgs=(), rules=(), nics=(("10.0.1.10", "p1"),), attached=()):
     return gw
 
 
-def run(argv, gw, capsys, monkeypatch, sleeps=None):
-    """argv -> (rc, stdout, stderr); any stray prompt fails loudly.
-    `sleeps` (a list) captures time.sleep calls instead of sleeping."""
+def run(argv, gw, capsys, monkeypatch):
+    """argv -> (rc, stdout, stderr); any stray prompt fails loudly."""
     monkeypatch.setattr(
         "builtins.input", lambda *_: pytest.fail("unexpected prompt")
     )
-    if sleeps is not None:
-        monkeypatch.setattr("time.sleep", sleeps.append)
     rc = main(list(argv), gateway=gw)
     captured = capsys.readouterr()
     return rc, captured.out, captured.err
@@ -103,21 +97,3 @@ def project(tmp_path):
 @pytest.fixture
 def gw():
     return seed(FakeGateway())
-
-
-class ExhaustOnce(FakeGateway):
-    """QuotaExhausted carrying a retry deadline on the FIRST
-    create_security_group, then normal — the wait-and-continue shape."""
-
-    def __init__(self, delay: float = 60.0):
-        super().__init__()
-        self._deadline = time.time() + delay
-        self.raised = False
-
-    def create_security_group(self, name, description):
-        if not self.raised:
-            self.raised = True
-            raise QuotaExhausted(
-                "budget exhausted for this window", retry_at=self._deadline
-            )
-        return super().create_security_group(name, description)

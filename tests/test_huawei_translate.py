@@ -1,6 +1,6 @@
 # tests/test_huawei_translate.py
 """The SDK adapter's wire essentials against a stub SDK (never a real
-network): dispatch pairing, rule translation, the rate chokepoint,
+network): dispatch pairing, rule translation, throttle wait-and-retry,
 pagination on one endpoint, the fixed_ips filter, 2-call inventory."""
 
 import re
@@ -12,8 +12,7 @@ from hcs_sg_iac.adapters.huawei_gateway import (
     HuaweiGateway,
     _bounds,
 )
-from hcs_sg_iac.adapters.ratelimit import FixedWindowLimiter
-from hcs_sg_iac.model.common import CloudError, CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.common import CloudError
 from hcs_sg_iac.model.portset import PortSet
 from huaweicloudsdkcore.exceptions.exceptions import (
     ClientRequestException,
@@ -91,7 +90,7 @@ def test_name_to_uuid_resolution_caches():
     assert len(listed) == 1
 
 
-# -- the chokepoint: every SDK call passes the limiter --
+# -- the chokepoint: every SDK call retries throttles in place --
 
 
 def _sdk_error(code, msg):
@@ -100,56 +99,51 @@ def _sdk_error(code, msg):
     )
 
 
-def _gateway(handler, budget=4):
-    limiter = FixedWindowLimiter(
-        budget=budget, window_seconds=300, clock=lambda: 1000.0
-    )  # frozen window
+def _gateway(handler, **kw):
     return HuaweiGateway(
-        SimpleNamespace(list_security_groups=handler), limiter
+        SimpleNamespace(list_security_groups=handler), **kw
     )
 
 
-def test_chokepoint_429_becomes_throttled_with_deadline():
+def test_throttle_waits_and_retries_in_place():
+    """429 twice then success: the gateway retries inside, the caller
+    never sees the throttle."""
+    calls = []
+
+    def flaky(req):
+        calls.append(1)
+        if len(calls) < 3:
+            raise ServiceResponseException(
+                429, _sdk_error("APIGW.0301", "too many")
+            )
+        return SimpleNamespace(security_groups=[])
+
+    gw = _gateway(flaky, throttle_wait=0.0)
+    assert gw.list_security_groups() == []
+    assert len(calls) == 3
+
+
+def test_persistent_throttle_becomes_clean_cloud_error():
     def raise_429(req):
-        if isinstance(req, Exception):
-            raise req
-        raise ServiceResponseException(
-            429, _sdk_error("APIGW.0301", "too many")
-        )
+        raise ServiceResponseException(429, _sdk_error("APIGW.0301", "slow"))
 
-    gw = _gateway(raise_429)
-    with pytest.raises(CloudThrottled) as ei:
+    gw = _gateway(raise_429, throttle_wait=0.0, throttle_tries=2)
+    with pytest.raises(CloudError) as ei:
         gw.list_security_groups()
-    assert ei.value.retry_at == 1300.0  # frozen clock + window
-    assert gw.quota_snapshot().effective_limit == 2  # halved
+    msg = str(ei.value)
+    assert "throttled" in msg and "APIGW.0301" in msg
+    assert "list_security_groups" in msg  # the call trail travels
 
-    # the real-shape variant (SDK internal retry exhaustion) too:
+    # the SDK's own internal-retry-exhaustion shape counts too:
     def raise_client_429(req):
         raise ClientRequestException(429, _sdk_error("429", "max retries"))
 
-    gw2 = _gateway(raise_client_429)
-    with pytest.raises(CloudThrottled) as ei2:
+    gw2 = _gateway(raise_client_429, throttle_wait=0.0, throttle_tries=2)
+    with pytest.raises(CloudError):
         gw2.list_security_groups()
-    assert ei2.value.retry_at == 1300.0
 
 
-def test_chokepoint_budget_shortcircuits_before_sdk():
-    calls = []
-
-    def ok(req):
-        calls.append(req)
-        return SimpleNamespace(security_groups=[])
-
-    gw = _gateway(ok, budget=1)
-    gw.list_security_groups()
-    with pytest.raises(QuotaExhausted) as ei:
-        gw.list_security_groups()
-    assert ei.value.retry_at == 1300.0
-    assert "last calls: list_security_groups" in str(ei.value)
-    assert len(calls) == 1  # guard fired BEFORE any SDK call
-
-
-def test_chokepoint_other_errors_become_cloud_error():
+def test_other_errors_become_cloud_error():
     def raise_404(req):
         raise ServiceResponseException(
             404, _sdk_error("VPC.0404", "not found")
@@ -159,7 +153,6 @@ def test_chokepoint_other_errors_become_cloud_error():
     with pytest.raises(CloudError) as ei:
         gw.list_security_groups()
     assert "VPC.0404" in str(ei.value)
-    assert gw.quota_snapshot().effective_limit == 4  # no shrink
 
 
 def test_pagination_follows_marker_one_endpoint():
@@ -178,10 +171,7 @@ def test_pagination_follows_marker_one_endpoint():
             security_groups=pages[1] if req.marker else pages[0]
         )
 
-    limiter = FixedWindowLimiter(
-        budget=10, window_seconds=300, clock=lambda: 1000.0
-    )
-    gw = HuaweiGateway(SimpleNamespace(list_security_groups=handler), limiter)
+    gw = HuaweiGateway(SimpleNamespace(list_security_groups=handler))
     # shrink the page size for the test via the module constant
     import hcs_sg_iac.adapters.huawei_gateway as hg
 
@@ -216,10 +206,7 @@ def test_find_nics_by_ip_filters_and_chunks():
             ]
         )
 
-    limiter = FixedWindowLimiter(
-        budget=10, window_seconds=300, clock=lambda: 1000.0
-    )
-    gw = HuaweiGateway(SimpleNamespace(list_ports=handler), limiter)
+    gw = HuaweiGateway(SimpleNamespace(list_ports=handler))
     ips = [f"10.0.0.{i}" for i in range(1, 4)] * 40  # 120 -> 2 chunks
     found = gw.find_nics_by_ip(ips)
     assert set(found) == set(ips)
@@ -254,14 +241,10 @@ def test_inventory_whole_cloud_in_two_calls():
             return SimpleNamespace(security_groups=[sg])
         return SimpleNamespace(ports=[port])
 
-    limiter = FixedWindowLimiter(
-        budget=10, window_seconds=300, clock=lambda: 1000.0
-    )
     gw = HuaweiGateway(
         SimpleNamespace(
             neutron_list_security_groups=handler, list_ports=handler
-        ),
-        limiter,
+        )
     )
     inv = gw.inventory()
     assert [s.name for s in inv.snapshot.sgs] == ["web"]

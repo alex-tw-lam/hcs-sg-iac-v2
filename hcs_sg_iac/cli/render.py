@@ -42,7 +42,7 @@ def _table(al, executed) -> list:
     return [_row(headers, widths)] + [_row(row, widths) for row in rows]
 
 
-def render_plan(al, quota=None, executed=None, dry_run: bool = True) -> str:
+def render_plan(al, executed=None, dry_run: bool = True) -> str:
     lines = _table(al, executed)
 
     s = al.summary()
@@ -56,16 +56,6 @@ def render_plan(al, quota=None, executed=None, dry_run: bool = True) -> str:
     # []-direction with no cloud rules deletes nothing — no false alarm.
     if al.clears:
         lines.append(f"WARNING: this removes ALL {', '.join(al.clears)}.")
-    if quota:
-        if quota.left is None:  # gateway without quota_snapshot
-            lines.append(
-                f"Quota: {quota.needed} calls needed, " f"remaining unknown."
-            )
-        else:
-            lines.append(
-                f"Quota: {quota.needed} calls needed, "
-                f"{quota.left} left in this window."
-            )
     for u in al.unmanaged:
         lines.append(f"NOT MANAGED: {u}")
     for o in al.overlap:
@@ -73,13 +63,11 @@ def render_plan(al, quota=None, executed=None, dry_run: bool = True) -> str:
     if executed is not None:
         counts = {
             k: sum(1 for r in executed if r.status == k)
-            for k in ("ok", "failed", "throttled")
+            for k in ("ok", "failed")
         }
         lines.append("")
         lines.append(
-            f"Apply complete: {counts['ok']} ok, "
-            f"{counts['failed']} failed, {counts['throttled']} "
-            f"throttled (re-run to resume)."
+            f"Apply complete: {counts['ok']} ok, {counts['failed']} failed."
         )
     if dry_run and executed is None:
         lines.append("")
@@ -87,7 +75,7 @@ def render_plan(al, quota=None, executed=None, dry_run: bool = True) -> str:
     return "\n".join(lines)
 
 
-def render_json(al, quota=None, executed=None) -> str:
+def render_json(al, executed=None) -> str:
     data = {
         "actions": [
             {
@@ -100,7 +88,8 @@ def render_json(al, quota=None, executed=None) -> str:
             for a in al.actions
         ],
         "summary": al.summary(),
-        "quota": quota.asdict() if quota else None,
+        "quota": None,  # the local budget limiter is gone; key kept for
+        # --json shape compatibility
         "unmanaged": list(al.unmanaged),
         "overlap": list(al.overlap),
     }

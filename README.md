@@ -7,7 +7,7 @@ writes, and the preview always prints before them.**
 
     uv tool install .            # or: pipx install .
     export HCS_AK=... HCS_SK=... HCS_PROJECT_ID=... HCS_ENDPOINT=...
-    # optional: CA_BUNDLE=/path/ca.pem   SSL_VERIFY=false   SERVICE_CALL_BUDGET=25
+    # optional: CA_BUNDLE=/path/ca.pem   SSL_VERIFY=false
 
 Credentials come from the environment only — never from files or flags.
 
@@ -61,10 +61,11 @@ overwrite existing files without `--force`; delete a file to unmanage.
 
 - Every write path goes through the preview table first; `--yes` is
   the consent, there are no prompts.
-- Rate limits: a fixed-window limiter guards every call; exhaustion
-  and cloud 429s WAIT out the window and continue (bounded retries) —
-  an unattended run finishes instead of stopping. Raise
-  SERVICE_CALL_BUDGET toward the cloud cap (~90/5min) for big estates.
+- Rate limits: the cloud throttling us (429 / APIGW) is waited out and
+  retried in place with a bounded number of attempts — an unattended
+  run finishes instead of stopping. (The old local call-budget limiter
+  and its SERVICE_CALL_BUDGET knob are gone; the setting is simply
+  ignored now.)
 - Member identity is the IP list; resolution fails clean on zero or
   multi-match before any write.
 - Whole-group deletion only via explicit `destroy NAME --yes`.

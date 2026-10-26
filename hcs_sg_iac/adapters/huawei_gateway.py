@@ -1,8 +1,8 @@
 # hcs_sg_iac/adapters/huawei_gateway.py
 """The ONLY module importing the Huawei SDK. Implements every protocol;
-every call goes through the fixed-window limiter (single chokepoint).
-Attach/detach uses the update-port pattern proven in the sibling
-service (v3 insert/remove not assumed published on HCS 8.5.1).
+throttled calls (429 / APIGW) wait and retry in place (single
+chokepoint). Attach/detach uses the update-port pattern proven in the
+sibling service (v3 insert/remove not assumed published on HCS 8.5.1).
 
 Discovered against huaweicloudsdkvpc 3.1.210 (v2 API): SG description
 updates ride the Neutron API (the native v2 create option has no
@@ -44,8 +44,13 @@ from huaweicloudsdkvpc.v2 import (
     UpdatePortRequestBody,
     VpcClient,
 )
+from tenacity import (
+    Retrying,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_fixed,
+)
 
-from hcs_sg_iac.adapters.ratelimit import FixedWindowLimiter
 from hcs_sg_iac.model.cloud import (
     CloudNic,
     CloudRule,
@@ -53,7 +58,7 @@ from hcs_sg_iac.model.cloud import (
     Inventory,
     Snapshot,
 )
-from hcs_sg_iac.model.common import CloudError, CloudThrottled, QuotaExhausted
+from hcs_sg_iac.model.common import CloudError
 from hcs_sg_iac.model.entities import Rule
 from hcs_sg_iac.model.portset import (  # PortSet via _bounds
     PortSet,
@@ -119,71 +124,53 @@ def build_gateway(config) -> "HuaweiGateway":
         .with_endpoint(config.hcs_endpoint)
         .build()
     )
-    limiter = FixedWindowLimiter(budget=config.budget, window_seconds=300)
-    return HuaweiGateway(sdk, limiter)
+    return HuaweiGateway(sdk)
+
+
+def _throttled(e: BaseException) -> bool:
+    """429 or APIGW-prefixed errors: the cloud side asking us to slow
+    down — waitable, retryable."""
+    return isinstance(e, ServiceResponseException) and (
+        e.status_code == 429 or str(e.error_code or "").startswith("APIGW")
+    )
 
 
 class HuaweiGateway:
-    def __init__(self, sdk, limiter):
+    def __init__(
+        self, sdk, *, throttle_wait: float = 30.0, throttle_tries: int = 6
+    ):
         self._sdk = sdk
-        self._limiter = limiter
-        self._sg_name_to_id = {}  # cache for remote-group resolution
+        self._retrying = Retrying(
+            retry=retry_if_exception(_throttled),
+            stop=stop_after_attempt(throttle_tries),
+            wait=wait_fixed(throttle_wait),
+            reraise=True,
+        )
+        self._sg_name_to_id: dict[str, str] = {}  # remote-group resolution
         self._recent_calls: list = []  # capped method-name trail; travels
-        # on rate errors so the exact call sequence that hit the 429 is
-        # visible in the one-line error (and the audit record)
-        self._warned_low_budget = False  # one warning per run, not per call
-
-    def quota_snapshot(self):
-        return self._limiter.snapshot()
+        # on errors so the exact call sequence that hit the throttle is
+        # visible in the one-line error
 
     def _run(self, request):
-        if not self._limiter.try_acquire():
-            raise QuotaExhausted(
-                "service call budget exhausted for this window; last "
-                f"calls: {', '.join(self._recent_calls[-20:])}",
-                retry_at=self._limiter.snapshot().window_resets_at,
-            )
         method_name = _METHODS[type(request).__name__]
         self._recent_calls.append(method_name)
         del self._recent_calls[:-50]  # cap the trail
         method = getattr(self._sdk, method_name)
         started = time.perf_counter()
         try:
-            resp = method(request)
-            snap = self._limiter.snapshot()
+            resp = self._retrying(method, request)
             _log.info(
-                "gateway call %s (%s/%s this window, %.0f ms)",
+                "gateway call %s (%.0f ms)",
                 method_name,
-                snap.used_calls,
-                snap.effective_limit,
                 (time.perf_counter() - started) * 1000,
             )
-            left = snap.left
-            if left <= 5 and not self._warned_low_budget:
-                self._warned_low_budget = True
-                _log.warning(
-                    "call budget nearly exhausted (%s left this window) — "
-                    "this is OUR limiter, not the cloud's: raise "
-                    "SERVICE_CALL_BUDGET (cloud cap ~90 per 5 min) for "
-                    "large batches, or let the run wait the window out",
-                    left,
-                )
             return resp
         except ServiceResponseException as e:
-            if e.status_code == 429 or str(e.error_code or "").startswith(
-                "APIGW"
-            ):
-                self._limiter.report_external_throttle()
-                _log.warning(
-                    "cloud throttle %s — our limit now %s",
-                    e.error_code,
-                    self._limiter.snapshot().effective_limit,
-                )
-                raise CloudThrottled(
-                    f"cloud throttled: {e.error_code} {e.error_msg}; "
-                    f"calls before throttle: "
-                    f"{', '.join(self._recent_calls[-20:])}",
-                    retry_at=self._limiter.snapshot().window_resets_at,
+            if _throttled(e):
+                raise CloudError(
+                    f"cloud throttled: {e.error_code} {e.error_msg} "
+                    f"(waited and retried, still throttled); calls "
+                    f"before: {', '.join(self._recent_calls[-20:])}"
                 ) from e
             raise CloudError(
                 f"{e.status_code}: {e.error_code} {e.error_msg}"

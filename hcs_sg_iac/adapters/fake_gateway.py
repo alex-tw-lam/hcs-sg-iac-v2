@@ -11,8 +11,7 @@ from hcs_sg_iac.model.cloud import (
     Inventory,
     Snapshot,
 )
-from hcs_sg_iac.model.common import CloudError, QuotaExhausted
-from hcs_sg_iac.model.quota import Quota
+from hcs_sg_iac.model.common import CloudError
 
 _log = logging.getLogger(__name__)  # --verbose: wired by the CLI
 
@@ -25,7 +24,6 @@ class FakeGateway:
         self._attached: set = set()  # (sg_id, port_id)
         self.call_log: list = []
         self._next = 0
-        self.budget: int | None = None  # None = unlimited
         self._calls = 0  # every protocol call (log line)
 
     # seeding (test/contract scaffolding, not part of protocols) --
@@ -48,23 +46,12 @@ class FakeGateway:
     def _trace(self, what: str) -> None:
         """Emit the SAME per-call line the real gateway emits — template
         parity is what makes --verbose output readable across fake and
-        real (contract suite runs both)."""
+        real."""
         self._calls += 1
-        limit = self.budget if self.budget is not None else "unlimited"
-        _log.info(
-            "gateway call %s (%s/%s this window, %.0f ms)",
-            what,
-            self._calls,
-            limit,
-            0.0,
-        )
+        _log.info("gateway call %s", what)
 
     def _spend(self, what: str):
         self.call_log.append(what)
-        if self.budget is not None and len(self.call_log) > self.budget:
-            raise QuotaExhausted(
-                f"fake budget exhausted ({self.budget} calls)"
-            )
 
     # -- reads --
     def list_security_groups(self) -> list:
@@ -181,12 +168,3 @@ class FakeGateway:
         self._spend(f"detach:{port_id}->{sg_id}")
         self._attached.discard((sg_id, port_id))
         self._trace(f"detach:{port_id}->{sg_id}")
-
-    # quota display helper used by the CLI (duck-typed, not a protocol)
-    def quota_snapshot(self) -> Quota:
-        limit = 25 if self.budget is None else self.budget
-        return Quota(
-            used_calls=len(self.call_log),
-            effective_limit=limit,
-            window_resets_at=None,
-        )

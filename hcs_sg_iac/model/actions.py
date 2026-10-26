@@ -79,5 +79,5 @@ class ActionList:
 @dataclass(frozen=True)
 class ActionResult:
     action: Action
-    status: 'Literal["ok", "failed", "throttled"]'
+    status: 'Literal["ok", "failed"]'
     error: str | None = None

@@ -11,7 +11,6 @@ from hcs_sg_iac.model.common import CloudError
 
 from tests.conftest import (
     INGRESS_YAML,
-    ExhaustOnce,
     cloud_rule,
     make_project,
     run,
@@ -60,14 +59,6 @@ def test_apply_yes_previews_before_writing(project, gw, capsys, monkeypatch):
     assert gw.call_log  # writes happened after the preview
 
 
-def test_apply_throttled_rc1_resume_hint(project, gw, capsys, monkeypatch):
-    gw.budget = 1
-    rc, out, _ = run(
-        ["apply", "--yes", P, str(project)], gw, capsys, monkeypatch
-    )
-    assert rc == 1 and "re-run to resume" in out
-
-
 def test_apply_json_pure_stdout(project, gw, capsys, monkeypatch):
     rc, out, err = run(
         ["apply", "--yes", "--json", P, str(project)], gw, capsys, monkeypatch
@@ -87,22 +78,6 @@ def test_apply_partial_failure_rc1(project, capsys, monkeypatch):
         ["apply", "--yes", P, str(project)], gw, capsys, monkeypatch
     )
     assert rc == 1 and "failed" in out
-
-
-def test_apply_waits_out_rate_window(project, capsys, monkeypatch):
-    """Wait-and-continue: budget exhaustion with a retry deadline sleeps
-    once, then completes — one command, unattended."""
-    sleeps = []
-    gw = seed(ExhaustOnce(delay=30.0))
-    rc, out, err = run(
-        ["apply", "--yes", P, str(project)],
-        gw,
-        capsys,
-        monkeypatch,
-        sleeps=sleeps,
-    )
-    assert rc == 0 and "Apply complete" in out
-    assert len(sleeps) == 1 and "waiting" in err
 
 
 def test_destroy_dry_run(project, capsys, monkeypatch):
