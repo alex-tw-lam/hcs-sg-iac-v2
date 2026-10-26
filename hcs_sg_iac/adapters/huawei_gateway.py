@@ -51,18 +51,18 @@ from tenacity import (
     wait_fixed,
 )
 
-from hcs_sg_iac.model.cloud import (
+from hcs_sg_iac.contracts import CloudError
+from hcs_sg_iac.entities import (  # PortSet via _bounds
+    PortSet,
+    Rule,
+    parse_ports,
+)
+from hcs_sg_iac.snapshot import (
     CloudNic,
     CloudRule,
     CloudSg,
     Inventory,
     Snapshot,
-)
-from hcs_sg_iac.model.common import CloudError
-from hcs_sg_iac.model.entities import Rule
-from hcs_sg_iac.model.portset import (  # PortSet via _bounds
-    PortSet,
-    parse_ports,
 )
 
 _log = logging.getLogger(__name__)  # --verbose: wired by the CLI

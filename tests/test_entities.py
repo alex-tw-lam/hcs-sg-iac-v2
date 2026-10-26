@@ -1,9 +1,17 @@
-# tests/test_model.py
+# tests/test_entities.py
 """The vocabulary's load-bearing corners: name boundaries, port grammar,
 remote normalisation, icmp/ports consistency, snapshot roundtrip."""
 
 import pytest
-from hcs_sg_iac.model.cloud import (
+from hcs_sg_iac.entities import (
+    PortError,
+    Report,
+    parse_group,
+    parse_ports,
+    parse_remote,
+    parse_rule_list,
+)
+from hcs_sg_iac.snapshot import (
     CloudNic,
     CloudRule,
     CloudSg,
@@ -11,9 +19,6 @@ from hcs_sg_iac.model.cloud import (
     snapshot_from_json,
     snapshot_to_json,
 )
-from hcs_sg_iac.model.common import Report, parse_remote
-from hcs_sg_iac.model.entities import parse_group, parse_rule_list
-from hcs_sg_iac.model.portset import PortError, parse_ports
 
 
 def _group(d):

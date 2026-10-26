@@ -3,7 +3,7 @@
 Liquibase-diff; identical snapshots are empty."""
 
 from hcs_sg_iac.cli.render import render_drift_lines
-from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg, Snapshot
+from hcs_sg_iac.snapshot import CloudNic, CloudRule, CloudSg, Snapshot
 from hcs_sg_iac.usecases.drift import diff_inventory
 
 

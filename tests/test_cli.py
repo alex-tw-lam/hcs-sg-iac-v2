@@ -7,7 +7,7 @@ import json
 import pytest
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.cli.main import main
-from hcs_sg_iac.model.common import CloudError
+from hcs_sg_iac.contracts import CloudError
 
 from tests.conftest import (
     INGRESS_YAML,

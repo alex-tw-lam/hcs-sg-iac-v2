@@ -1,19 +1,187 @@
-# hcs_sg_iac/model/entities.py
-"""Domain entities. The model IS the schema: from-dict constructors
-validate everything and report ALL violations into the Report."""
+# hcs_sg_iac/entities.py
+"""The desired-state vocabulary: the ports grammar, the remote ends of
+a rule, the collect-all Report, and the YAML entities themselves. The
+types ARE the schema: from-dict constructors validate everything and
+report ALL violations into the Report."""
 
 import ipaddress
 import re
 from dataclasses import dataclass
 from typing import cast
 
-from hcs_sg_iac.model.common import (
-    Remote,
-    Report,
-    looks_like_ip,
-    parse_remote,
-)
-from hcs_sg_iac.model.portset import PortError, PortSet, parse_ports
+# ---- the collect-all report ----
+
+
+class Report:
+    """Collects EVERY violation (never fail-fast) with a `where`."""
+
+    def __init__(self):
+        self.errors: list = []
+
+    def error(self, where: str, message: str) -> None:
+        self.errors.append(f"{where}: {message}")
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+
+# ---- the far end of a rule: another group, or a canonical v4 CIDR ----
+
+
+@dataclass(frozen=True)
+class RemoteGroup:
+    name: str
+
+
+@dataclass(frozen=True)
+class RemoteCidr:
+    cidr: str
+
+    def __post_init__(self):
+        net = ipaddress.ip_network(self.cidr, strict=False)
+        if net.version != 4:
+            raise ValueError(f"IPv6 is not supported: {self.cidr!r}")
+        object.__setattr__(self, "cidr", str(net))
+
+
+Remote = RemoteGroup | RemoteCidr
+
+
+def parse_remote(value: str):
+    """Group name or IPv4 CIDR -> Remote. Group names can never look
+    like an IP/CIDR (charset rule below), so a plain string is
+    unambiguous; a bare IP becomes its /32."""
+    if not value.strip():
+        raise ValueError(f"empty remote: {value!r}")
+    if "/" in value or looks_like_ip(value):
+        return RemoteCidr(cidr=value)
+    return RemoteGroup(name=value)
+
+
+def looks_like_ip(value: str):
+    """IP or CIDR shaped (group names can never be, by the charset rule
+    below — so a plain string is unambiguous)."""
+    try:
+        if "/" in value:
+            ipaddress.ip_network(value, strict=False)
+        else:
+            ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+# ---- the ports grammar — identical to Huawei multiport ----
+# "80", "22,443", "8000-9000". Accepts str / int / list input,
+# normalises to the canonical sorted+merged PortSet. None (or empty
+# input) means ALL ports. This is the single parser: the entities parse
+# user input at construction, and the huawei adapter translates wire
+# port ranges back through it. PortSet owns the grammar OPERATIONS too
+# (sub-rule expansion, wire bounds).
+
+_MAX_ENTRIES = 20
+
+
+class PortError(Exception):
+    pass
+
+
+class PortSet(str):
+    """A canonical ports spec. Subclasses str so it serialises, compares
+    and displays as the canonical string everywhere (snapshot JSON,
+    identity tuples, frame expectations) while owning the grammar ops."""
+
+    __slots__ = ()
+
+    @property
+    def entries(self) -> "tuple[str, ...]":
+        """Comma-separated entries, ranges intact — the plan engine's
+        sub-rule expansion ("22,443" -> "22", "443"; "80-90" stays)."""
+        return tuple(self.split(",")) if self else ()
+
+    def bounds(self, entry: str) -> "tuple[int, int]":
+        """(lo, hi) of ONE entry — the wire translation."""
+        lo_s, _, hi_s = entry.partition("-")
+        return int(lo_s), int(hi_s or lo_s)
+
+
+@dataclass(frozen=True)
+class _Range:
+    lo: int
+    hi: int
+
+
+def _parse_entry(raw: str, field: str) -> _Range:
+    """One ports entry ("80" | "8000-9000") -> _Range; PortError with
+    the caller's field context."""
+    raw = raw.strip()
+    if not raw:
+        raise PortError(f"{field}: empty entry in ports list")
+    if "-" in raw:
+        lo_s, hi_s = raw.split("-", 1)
+        if not (lo_s.strip().isascii() and lo_s.strip().isdigit()) or not (
+            hi_s.strip().isascii() and hi_s.strip().isdigit()
+        ):
+            raise PortError(f"{field}: bad port range {raw!r}")
+        lo, hi = int(lo_s), int(hi_s)
+    else:
+        if not (raw.isascii() and raw.isdigit()):
+            raise PortError(f"{field}: bad port {raw!r}")
+        lo = hi = int(raw)
+    if not (1 <= lo <= 65535 and 1 <= hi <= 65535):
+        raise PortError(f"{field}: port out of range 1-65535: {raw!r}")
+    if lo > hi:
+        raise PortError(f"{field}: reversed range {raw!r}")
+    return _Range(lo, hi)
+
+
+def _merge(ranges: list) -> list:
+    """Sort and merge adjacent/overlapping ranges (the union)."""
+    ranges.sort(key=lambda r: (r.lo, r.hi))
+    merged: list = []
+    for r in ranges:
+        if merged and r.lo <= merged[-1].hi + 1:
+            merged[-1] = _Range(merged[-1].lo, max(merged[-1].hi, r.hi))
+        else:
+            merged.append(r)
+    return merged
+
+
+def parse_ports(value, *, field: str = "ports") -> "PortSet | None":
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise PortError(f"{field}: expected string/int/list, got bool")
+    if isinstance(value, int):
+        items = [str(value)]
+    elif isinstance(value, (list, tuple)):
+        items = [str(v) for v in value]
+    elif isinstance(value, str):
+        s = value.strip()
+        items = s.split(",") if s else []
+    else:
+        raise PortError(
+            f"{field}: expected string/int/list, got {type(value).__name__}"
+        )
+    if not items:
+        return None
+    merged = _merge([_parse_entry(raw, field) for raw in items])
+    if len(merged) == 1 and merged[0].lo == 1 and merged[0].hi == 65535:
+        return None  # full range is semantically all ports
+    if len(merged) > _MAX_ENTRIES:
+        raise PortError(
+            f"{field}: at most {_MAX_ENTRIES} port entries "
+            f"(Huawei multiport cap), got {len(merged)}"
+        )
+    return PortSet(
+        ",".join(
+            str(r.lo) if r.lo == r.hi else f"{r.lo}-{r.hi}" for r in merged
+        )
+    )
+
+
+# ---- the entities ----
 
 GROUP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 PROTOCOLS = ("tcp", "udp", "icmp", "icmpv6", "all")

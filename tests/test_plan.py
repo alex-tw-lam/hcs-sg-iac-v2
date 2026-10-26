@@ -4,7 +4,7 @@ joins, self-rule preservation, duplicate names, clears, drift cases."""
 
 from hcs_sg_iac.adapters import yaml_config
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
-from hcs_sg_iac.model.entities import Group
+from hcs_sg_iac.entities import Group
 from hcs_sg_iac.usecases.resolve import resolve_memberships
 
 from tests.conftest import (
@@ -81,7 +81,7 @@ def test_dangling_remote_group_ref_rejected(tmp_path):
 
 
 def test_resolve_zero_and_multi_match(tmp_path):
-    from hcs_sg_iac.model.entities import DesiredState, Member
+    from hcs_sg_iac.entities import DesiredState, Member
 
     state = DesiredState(
         groups={

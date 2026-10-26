@@ -4,9 +4,8 @@ one NIC in the account. Overlaps between groups are allowed → info."""
 
 from dataclasses import dataclass, field
 
-from hcs_sg_iac.model.common import Report
-from hcs_sg_iac.model.entities import DesiredState
-from hcs_sg_iac.model.gateway import CloudReader
+from hcs_sg_iac.contracts import CloudReader
+from hcs_sg_iac.entities import DesiredState, Report
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,8 @@ failed group create are skipped, not orphaned."""
 import logging
 from typing import Literal
 
-from hcs_sg_iac.model.actions import (
+from hcs_sg_iac.contracts import CloudGateway
+from hcs_sg_iac.usecases.actions import (
     ActionList,
     ActionResult,
     AttachNic,
@@ -18,7 +19,6 @@ from hcs_sg_iac.model.actions import (
     DetachNic,
     UpdateSg,
 )
-from hcs_sg_iac.model.gateway import CloudGateway
 
 _log = logging.getLogger(__name__)  # --verbose: wired by the CLI
 

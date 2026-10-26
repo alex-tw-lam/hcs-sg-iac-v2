@@ -8,16 +8,17 @@ directions of every imported group are managed."""
 
 from dataclasses import dataclass, field
 
-from hcs_sg_iac.model.cloud import Snapshot
-from hcs_sg_iac.model.common import RemoteCidr, RemoteGroup
-from hcs_sg_iac.model.entities import (
+from hcs_sg_iac.entities import (
     GROUP_NAME_RE,
     PROTOCOLS,
     Group,
     Member,
+    RemoteCidr,
+    RemoteGroup,
     Rule,
     RulesFile,
 )
+from hcs_sg_iac.snapshot import Snapshot
 
 _DELETE_NOTE = (
     " — apply will plan this rule as a delete (remove it in "

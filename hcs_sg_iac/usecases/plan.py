@@ -9,7 +9,10 @@ substitutes the id of the SG it just created for that group name."""
 import json
 import logging
 
-from hcs_sg_iac.model.actions import (
+from hcs_sg_iac.contracts import CloudReader
+from hcs_sg_iac.entities import DesiredState, PortSet, RemoteGroup, Rule
+from hcs_sg_iac.snapshot import Snapshot
+from hcs_sg_iac.usecases.actions import (
     Action,
     ActionList,
     AttachNic,
@@ -20,11 +23,6 @@ from hcs_sg_iac.model.actions import (
     DetachNic,
     UpdateSg,
 )
-from hcs_sg_iac.model.cloud import Snapshot
-from hcs_sg_iac.model.common import RemoteGroup
-from hcs_sg_iac.model.entities import DesiredState, Rule
-from hcs_sg_iac.model.gateway import CloudReader
-from hcs_sg_iac.model.portset import PortSet
 from hcs_sg_iac.usecases.resolve import Resolution
 
 _log = logging.getLogger(__name__)  # --verbose: wired by the CLI

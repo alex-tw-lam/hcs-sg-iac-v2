@@ -1,8 +1,9 @@
 # tests/test_architecture.py
-"""Third-party designation: model/, usecases/ and cli/ import stdlib +
-hcs_sg_iac only; adapters/ files import EXACTLY their designated
-third-party lib (an unregistered adapter file FAILS — additions are
-deliberate). Ring DIRECTION is tach's job (tach.toml).
+"""Third-party designation: the vocabulary leaves, usecases/ and cli/
+import stdlib + hcs_sg_iac only; adapters/ files import EXACTLY their
+designated third-party lib (an unregistered adapter file FAILS —
+additions are deliberate). Dependency DIRECTION is tach's job
+(tach.toml).
 """
 
 import ast
@@ -14,7 +15,8 @@ import pytest
 PKG = pathlib.Path(__file__).resolve().parents[1] / "hcs_sg_iac"
 STDLIB = sys.stdlib_module_names
 
-RINGS = ("model", "usecases", "adapters", "cli")
+RINGS = ("usecases", "adapters", "cli")
+LEAVES = ("contracts.py", "entities.py", "snapshot.py", "__init__.py")
 
 ADAPTER_THIRD_PARTY = {
     "yaml_config.py": {"yaml"},
@@ -30,9 +32,10 @@ ADAPTER_THIRD_PARTY = {
 ALLOWED_INTERNAL = {"hcs_sg_iac"}
 
 
-# model imports itself; usecases add themselves; adapters add themselves
-# (same-ring imports allowed by construction); cli, the outermost ring,
-# may import anything in the package.
+# the vocabulary leaves and the rings import each other by name; the
+# leaves carry no third-party imports at all, usecases/cli stay
+# stdlib+internal, adapters carry their designated libs, and cli, the
+# outermost ring, may import anything in the package.
 def _package_of(path: pathlib.Path) -> str:
     """Containing package of a module file, as a dotted path
     (…/hcs_sg_iac/usecases/x.py -> hcs_sg_iac.usecases)."""
@@ -41,8 +44,8 @@ def _package_of(path: pathlib.Path) -> str:
 
 
 def _roots(path: pathlib.Path) -> set:
-    """Third-party import roots of one file (the ring-direction half of
-    the old analysis is tach's job now)."""
+    """Third-party import roots of one file (the dependency-direction
+    half is tach's job now)."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     roots = set()
     for node in ast.walk(tree):
@@ -54,7 +57,8 @@ def _roots(path: pathlib.Path) -> set:
 
 
 def _all_files() -> list:
-    files = []
+    files = [PKG / name for name in LEAVES]
+    assert all(f.is_file() for f in files), "missing a vocabulary leaf"
     for ring in RINGS:
         d = PKG / ring
         assert d.is_dir(), f"missing package dir: {d}"

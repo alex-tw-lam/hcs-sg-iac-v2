@@ -7,16 +7,17 @@ from pathlib import Path
 
 import yaml
 
-from hcs_sg_iac.model.common import RemoteGroup, Report
-from hcs_sg_iac.model.entities import (
+from hcs_sg_iac.entities import (
     GROUP_NAME_RE,
     DesiredState,
     Group,
+    PortSet,
+    RemoteGroup,
+    Report,
     RulesFile,
     parse_group,
     parse_rule_list,
 )
-from hcs_sg_iac.model.portset import PortSet
 
 _FAILED = object()  # sentinel: read/parse failed (error already reported)
 

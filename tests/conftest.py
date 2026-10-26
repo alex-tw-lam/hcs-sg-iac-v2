@@ -5,7 +5,7 @@ a seeded FakeGateway, and the run() harness every CLI scenario uses."""
 import pytest
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.cli.main import main
-from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg
+from hcs_sg_iac.snapshot import CloudNic, CloudRule, CloudSg
 from hcs_sg_iac.usecases.plan import plan, read_snapshot
 from hcs_sg_iac.usecases.resolve import resolve_memberships
 

@@ -2,7 +2,7 @@
 """The executor: mid-failure isolation, dependent skipping, ordering."""
 
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
-from hcs_sg_iac.model.common import CloudError
+from hcs_sg_iac.contracts import CloudError
 from hcs_sg_iac.usecases.apply import execute
 
 from tests.conftest import (

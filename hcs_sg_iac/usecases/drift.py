@@ -5,7 +5,7 @@ unexpected (appeared in the cloud), changed (same id, different
 fields). Keyed by cloud ID throughout — duplicated names (SGs, VMs)
 never confuse the diff; renames surface as a `name` difference."""
 
-from hcs_sg_iac.model.cloud import Snapshot
+from hcs_sg_iac.snapshot import Snapshot
 
 _RULE_FIELDS = (
     "direction",

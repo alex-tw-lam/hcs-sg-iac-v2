@@ -6,12 +6,11 @@ this module stays import-pure."""
 
 import logging
 
-from hcs_sg_iac.model.actions import ActionList
-from hcs_sg_iac.model.common import CloudError
-from hcs_sg_iac.model.gateway import CloudGateway, CloudReader
+from hcs_sg_iac.contracts import CloudError, CloudGateway, CloudReader
 from hcs_sg_iac.usecases import apply as apply_uc
 from hcs_sg_iac.usecases import plan as plan_uc
 from hcs_sg_iac.usecases import resolve
+from hcs_sg_iac.usecases.actions import ActionList
 
 _log = logging.getLogger(__name__)  # --verbose: wired by the CLI
 

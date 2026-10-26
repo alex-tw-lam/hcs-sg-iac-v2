@@ -14,9 +14,8 @@ from pathlib import Path
 from hcs_sg_iac.adapters import yaml_config
 from hcs_sg_iac.adapters.snapshot_gateway import SnapshotGateway
 from hcs_sg_iac.cli import render
-from hcs_sg_iac.model.cloud import snapshot_from_json, snapshot_to_json
-from hcs_sg_iac.model.common import CloudError
-from hcs_sg_iac.model.gateway import CloudGateway, CloudReader
+from hcs_sg_iac.contracts import CloudError, CloudGateway, CloudReader
+from hcs_sg_iac.snapshot import snapshot_from_json, snapshot_to_json
 from hcs_sg_iac.usecases import drift as drift_uc
 from hcs_sg_iac.usecases import importer, pipeline
 from hcs_sg_iac.usecases.plan import read_snapshot

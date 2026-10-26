@@ -12,8 +12,8 @@ from hcs_sg_iac.adapters.huawei_gateway import (
     HuaweiGateway,
     _bounds,
 )
-from hcs_sg_iac.model.common import CloudError
-from hcs_sg_iac.model.portset import PortSet
+from hcs_sg_iac.contracts import CloudError
+from hcs_sg_iac.entities import PortSet
 from huaweicloudsdkcore.exceptions.exceptions import (
     ClientRequestException,
     ServiceResponseException,

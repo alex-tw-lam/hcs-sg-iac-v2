@@ -4,14 +4,14 @@ CLI e2e and the contract suite. call_log records every write."""
 
 import logging
 
-from hcs_sg_iac.model.cloud import (
+from hcs_sg_iac.contracts import CloudError
+from hcs_sg_iac.snapshot import (
     CloudNic,
     CloudRule,
     CloudSg,
     Inventory,
     Snapshot,
 )
-from hcs_sg_iac.model.common import CloudError
 
 _log = logging.getLogger(__name__)  # --verbose: wired by the CLI
 

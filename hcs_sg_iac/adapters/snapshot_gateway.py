@@ -6,7 +6,7 @@ this reader with the real gateway when --yes writes land."""
 
 from pathlib import Path
 
-from hcs_sg_iac.model.cloud import Inventory, snapshot_from_json
+from hcs_sg_iac.snapshot import Inventory, snapshot_from_json
 
 
 class SnapshotGateway:

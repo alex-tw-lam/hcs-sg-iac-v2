@@ -1,11 +1,11 @@
-# hcs_sg_iac/model/actions.py
+# hcs_sg_iac/usecases/actions.py
 """Plan output + executable payloads. One ActionList feeds the renderer
 (dry-run display) and apply (execution) — a single source of truth."""
 
 from dataclasses import dataclass
 from typing import Literal
 
-from hcs_sg_iac.model.entities import Rule
+from hcs_sg_iac.entities import Rule
 
 
 # ---- executable payloads (discriminated by type) ----

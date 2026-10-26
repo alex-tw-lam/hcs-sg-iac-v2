@@ -1,16 +1,21 @@
-# hcs_sg_iac/model/gateway.py
-"""Ports (interfaces). The read side is ONE seam — inventory() gives the
-whole observed cloud in a single pass (every gateway implements it; it
-replaced the per-SG read loop and the five-protocol sprawl) plus the
-member-IP lookup resolution needs. The write side stays segregated:
-apply additionally needs the writers. Any gateway (real SDK, in-memory
-fake, snapshot replay) is substitutable (LSP) — the contract suite
-enforces it."""
+# hcs_sg_iac/contracts.py
+"""The cloud boundary: two Protocols + the domain error. The read side
+is ONE seam — inventory() gives the whole observed cloud in a single
+pass (every gateway implements it; it replaced the per-SG read loop and
+the five-protocol sprawl) plus the member-IP lookup resolution needs.
+The write side stays segregated: apply additionally needs the writers.
+Any gateway (real SDK, in-memory fake, snapshot replay) is
+substitutable (LSP)."""
 
 from typing import Protocol
 
-from hcs_sg_iac.model.cloud import CloudNic, CloudRule, CloudSg
-from hcs_sg_iac.model.entities import Rule
+from hcs_sg_iac.entities import Rule
+from hcs_sg_iac.snapshot import CloudNic, CloudRule, CloudSg
+
+
+class CloudError(Exception):
+    """Cloud/API failure after any in-place retries (one clean line, no
+    traceback)."""
 
 
 class CloudReader(Protocol):
