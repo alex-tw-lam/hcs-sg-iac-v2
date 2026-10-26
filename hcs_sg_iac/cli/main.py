@@ -1,5 +1,5 @@
 # hcs_sg_iac/cli/main.py
-"""Argparse presentation layer: parse → config → gateway → pipeline →
+"""Argparse presentation layer: parse → config → gateway → engine →
 render. Dry run is the DEFAULT; --yes is the ONLY path to real writes —
 it confirms the preview the command prints first (no prompts)."""
 
@@ -11,14 +11,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from hcs_sg_iac import engine
 from hcs_sg_iac.adapters import yaml_config
 from hcs_sg_iac.adapters.snapshot_gateway import SnapshotGateway
 from hcs_sg_iac.cli import render
 from hcs_sg_iac.contracts import CloudError, CloudGateway, CloudReader
 from hcs_sg_iac.snapshot import snapshot_from_json, snapshot_to_json
-from hcs_sg_iac.usecases import drift as drift_uc
-from hcs_sg_iac.usecases import importer, pipeline
-from hcs_sg_iac.usecases.plan import read_snapshot
 
 _log = logging.getLogger("hcs_sg_iac.cli")  # --verbose: wired below
 
@@ -208,7 +206,7 @@ def _commit(ctx, al, args) -> int:
     (--yes IS the consent; --json stdout stays pure), the end-of-run
     table, and the snapshot staleness note."""
     _print_preview(al, args)
-    results = pipeline.execute_confirmed(ctx.gateway, al)
+    results = engine.execute(al, gateway=ctx.gateway)
     _print_plan(al, args=args, executed=results)
     _snapshot_stale_note(ctx.stale_note_source())
     return 0 if all(r.status == "ok" for r in results) else 1
@@ -217,7 +215,7 @@ def _commit(ctx, al, args) -> int:
 @dataclass(frozen=True)
 class _Ctx:
     """What the cloud-command handlers share: the project dir, the
-    gateway (real SDK or injected), the reader the pipeline sees (a
+    gateway (real SDK or injected), the reader the engine sees (a
     SnapshotGateway when planning offline), and the snapshot provenance
     the post-write staleness note needs."""
 
@@ -316,7 +314,7 @@ def _cmd_import(args, project) -> int:
         )
         return 1
     _log.info("phase: importing from %s", src)
-    imported = importer.import_snapshot(
+    imported = yaml_config.import_snapshot(
         snapshot_from_json(src.read_text(encoding="utf-8")).snapshot
     )
     writes: dict = {}
@@ -382,7 +380,9 @@ def _cmd_drift(args, ctx: _Ctx) -> int:
     old = snapshot_from_json(
         ctx.snap_file.read_text(encoding="utf-8")
     ).snapshot
-    result = drift_uc.diff_inventory(old, read_snapshot(ctx.gateway))
+    result = engine.diff_inventory(
+        old, ctx.gateway.inventory().snapshot
+    )
     n = sum(len(result[k]) for k in ("missing", "unexpected", "changed"))
     if args.json:
         print(
@@ -424,14 +424,34 @@ def _cmd_snapshot(args, ctx: _Ctx) -> int:
     return 0
 
 
+def _plan_project(readers: "CloudReader", project: Path):
+    """Load → resolve → plan, the workflow the old pipeline module
+    owned. Returns (ActionList, []) on success or (None, error lines);
+    engine errors (duplicate cloud names, the whole-estate guard)
+    surface as clean lines, never tracebacks."""
+    state, report = yaml_config.load_project(project)
+    if state is None:
+        return None, list(report.errors)
+    try:
+        _log.info(
+            "phase: reading the observed state, resolving %d member IPs",
+            sum(len(g.members) for g in state.groups.values()),
+        )
+        inventory = readers.inventory()
+        resolution = engine.resolve_memberships(inventory.nics_by_ip, state)
+        if not resolution.report.ok:
+            return None, list(resolution.report.errors)
+        return engine.plan(state, resolution, inventory.snapshot), []
+    except ValueError as e:
+        return None, [f"error: {e}"]
+    except CloudError as e:
+        return None, [f"error: {e}"]
+
+
 def _cmd_plan_apply(args, ctx: _Ctx) -> int:
     if ctx.readers is None:  # _resolve_ctx guarantees it for plan/apply
         return 1
-    planned, errors = pipeline.plan_project(
-        yaml_config.load_project,
-        ctx.readers,
-        ctx.project,
-    )
+    planned, errors = _plan_project(ctx.readers, ctx.project)
     if planned is None:
         print("\n".join(errors), file=sys.stderr)
         return 1

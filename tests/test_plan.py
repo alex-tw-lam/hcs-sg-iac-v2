@@ -3,9 +3,8 @@
 joins, self-rule preservation, duplicate names, clears, drift cases."""
 
 from hcs_sg_iac.adapters import yaml_config
-from hcs_sg_iac.adapters.fake_gateway import FakeGateway
+from hcs_sg_iac.engine import resolve_memberships
 from hcs_sg_iac.entities import Group
-from hcs_sg_iac.usecases.resolve import resolve_memberships
 
 from tests.conftest import (
     GROUP_YAML,
@@ -14,6 +13,7 @@ from tests.conftest import (
     plan_state,
     seed,
 )
+from tests.fake_gateway import FakeGateway
 
 
 def _state(root):
@@ -61,7 +61,7 @@ def test_loader_yaml_syntax_error(tmp_path):
 
 
 def test_dangling_remote_group_ref_rejected(tmp_path):
-    from hcs_sg_iac.usecases import pipeline
+    from hcs_sg_iac.cli.main import _plan_project
 
     make_project(
         tmp_path,
@@ -70,9 +70,7 @@ def test_dangling_remote_group_ref_rejected(tmp_path):
             "security-groups/web/ingress.yaml": "- {source: ghost, protocol: tcp, ports: '22'}\n",
         },
     )
-    al, errors = pipeline.plan_project(
-        yaml_config.load_project, FakeGateway(), tmp_path
-    )
+    al, errors = _plan_project(FakeGateway(), tmp_path)
     assert al is None
     assert any("ghost" in e for e in errors)
 
@@ -91,7 +89,7 @@ def test_resolve_zero_and_multi_match(tmp_path):
         rules={},
     )
     gw = seed(FakeGateway(), nics=(("10.0.2.20", "pa"), ("10.0.2.20", "pb")))
-    res = resolve_memberships(gw, state)
+    res = resolve_memberships(gw.inventory().nics_by_ip, state)
     assert not res.report.ok
     errs = " ".join(res.report.errors)
     assert "no NIC found" in errs and "matches multiple NICs" in errs
@@ -335,9 +333,7 @@ def test_empty_groups_refuses_whole_estate_deletion(tmp_path):
     """security-groups/ present but empty, cloud non-empty: refuse."""
     (tmp_path / "security-groups").mkdir()
     gw = seed(FakeGateway(), sgs=(("sg-1", "web", "web"),))
-    from hcs_sg_iac.usecases import pipeline
+    from hcs_sg_iac.cli.main import _plan_project
 
-    al, errors = pipeline.plan_project(
-        yaml_config.load_project, gw, tmp_path
-    )
+    al, errors = _plan_project(gw, tmp_path)
     assert al is None and any("refusing" in e for e in errors)

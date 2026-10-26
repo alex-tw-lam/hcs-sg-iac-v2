@@ -1,9 +1,8 @@
 # tests/test_apply.py
 """The executor: mid-failure isolation, dependent skipping, ordering."""
 
-from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.contracts import CloudError
-from hcs_sg_iac.usecases.apply import execute
+from hcs_sg_iac.engine import execute
 
 from tests.conftest import (
     GROUP_YAML,
@@ -12,6 +11,7 @@ from tests.conftest import (
     plan_state,
     seed,
 )
+from tests.fake_gateway import FakeGateway
 
 
 def _project(tmp_path, files=None):
@@ -70,10 +70,9 @@ def test_execute_updates_description_and_deletes_extra_rule(tmp_path):
     """The write-side branches no scenario reached: UpdateSg (description
     drift) and DeleteRule (cloud has extra) execute and converge."""
     root = _project(tmp_path)  # code: desc 'web', ingress 22/203.0.113.0/24
-    from hcs_sg_iac.adapters.fake_gateway import FakeGateway
-
     from tests.conftest import cloud_rule
     from tests.conftest import seed as _s
+    from tests.fake_gateway import FakeGateway
 
     sg = ("sg-web", "web", "OLD-DESC")
     extra = cloud_rule(id="r-extra", sg_id="sg-web", ports="8080")

@@ -6,7 +6,6 @@ import json
 import shutil
 
 import pytest
-from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.cli.main import main
 from hcs_sg_iac.contracts import CloudError
 
@@ -18,6 +17,7 @@ from tests.conftest import (
     seed,
     write_snapshot,
 )
+from tests.fake_gateway import FakeGateway
 
 P = "--project"
 
@@ -188,8 +188,9 @@ def test_plan_verbose_logs_phases(project, gw, capsys, monkeypatch):
         ["plan", "--verbose", P, str(project)], gw, capsys, monkeypatch
     )
     assert rc == 0 and "Dry run" in out
-    assert "hcs-sg: phase: reading cloud snapshot" in err
-    assert "hcs-sg: gateway call" in err
+    assert "hcs-sg: phase: reading the observed state" in err
+    # resolve is pure now (fed by the inventory's IP→NIC index), so a
+    # plan emits no per-call gateway trail — only writes do
 
 
 def test_duplicate_cloud_names_clean_error(project, capsys, monkeypatch):

@@ -93,28 +93,27 @@ docs: "Air-Gapped Environment") or simply runs the scan elsewhere.
 
 ## Architecture
 
-Three vocabulary leaves under three rings; imports point inward, inner
+Vocabulary and brain leaves over two rings; imports point inward, inner
 rings never know outer ones exist.
 
     entities.py     the DESIRED state — YAML entities + ports grammar
     snapshot.py     the OBSERVED state — cloud types + snapshot codec
     contracts.py    the cloud boundary — two Protocols + CloudError
-    usecases/       the verbs — plan · apply · pipeline · resolve ·
-                    drift · importer (+ actions, the plan vocabulary)
-    adapters/       the ONLY third-party ring — SDK, PyYAML, fakes,
-                    snapshots
+    engine.py       the brain — resolve · plan · execute · drift,
+                    pure calculation
+    adapters/       the ONLY third-party ring — SDK, PyYAML, snapshots
     cli/            thin presentation — argv in, tables/JSON out
 
 Two seams, enforced two ways: **dependency direction** by `tach check`
-(tach.toml — the leaves plus ring-level modules; sibling imports inside
-a ring are internal by construction); **per-file third-party
-designation** by tests/test_architecture.py (yaml_config→yaml,
-huawei_gateway→SDK+tenacity; an unregistered adapter file FAILS). The
-cloud boundary is TWO Protocols (contracts.py): CloudReader
-(inventory() is the single read seam + find_nics_by_ip) and
-CloudWriter. Three interchangeable gateways implement them — huawei
-(SDK), fake (in-memory, powers every test), snapshot replay (offline
-planning). Desired state (`Group`/`Rule`) vs observed
+(tach.toml — the leaves plus ring-level modules); **per-file
+third-party designation** by tests/test_architecture.py
+(yaml_config→yaml, huawei_gateway→SDK+tenacity; an unregistered
+adapter file FAILS). The cloud boundary is TWO Protocols
+(contracts.py): CloudReader (inventory() is the single read seam +
+find_nics_by_ip) and CloudWriter. Two interchangeable gateways
+implement them in the prod package — huawei (SDK) and snapshot replay
+(offline planning); the tests add an in-memory fake that powers the
+e2e CLI scenarios. Desired state (`Group`/`Rule`) vs observed
 (`CloudSg`/`CloudRule`) join on identity tuples
 `(direction, protocol, ports, remote)`; plan output is ONE ActionList
 carrying both display rows and executable payloads.

@@ -1,9 +1,9 @@
 # tests/test_architecture.py
-"""Third-party designation: the vocabulary leaves, usecases/ and cli/
-import stdlib + hcs_sg_iac only; adapters/ files import EXACTLY their
-designated third-party lib (an unregistered adapter file FAILS —
-additions are deliberate). Dependency DIRECTION is tach's job
-(tach.toml).
+"""Third-party designation: the leaves (entities/snapshot/contracts/
+engine) and cli/ import stdlib + hcs_sg_iac only; adapters/ files
+import EXACTLY their designated third-party lib (an unregistered
+adapter file FAILS — additions are deliberate). Dependency DIRECTION
+is tach's job (tach.toml).
 """
 
 import ast
@@ -15,8 +15,8 @@ import pytest
 PKG = pathlib.Path(__file__).resolve().parents[1] / "hcs_sg_iac"
 STDLIB = sys.stdlib_module_names
 
-RINGS = ("usecases", "adapters", "cli")
-LEAVES = ("contracts.py", "entities.py", "snapshot.py", "__init__.py")
+RINGS = ("adapters", "cli")
+LEAVES = ("contracts.py", "entities.py", "engine.py", "snapshot.py", "__init__.py")
 
 ADAPTER_THIRD_PARTY = {
     "yaml_config.py": {"yaml"},
@@ -25,20 +25,19 @@ ADAPTER_THIRD_PARTY = {
         "huaweicloudsdkvpc",
         "tenacity",
     },
-    "fake_gateway.py": set(),
     "snapshot_gateway.py": set(),
     "__init__.py": set(),
 }
 ALLOWED_INTERNAL = {"hcs_sg_iac"}
 
 
-# the vocabulary leaves and the rings import each other by name; the
-# leaves carry no third-party imports at all, usecases/cli stay
-# stdlib+internal, adapters carry their designated libs, and cli, the
-# outermost ring, may import anything in the package.
+# the leaves and the rings import each other by name; the leaves carry
+# no third-party imports at all, cli stays stdlib+internal, adapters
+# carry their designated libs, and cli, the outermost ring, may import
+# anything in the package.
 def _package_of(path: pathlib.Path) -> str:
     """Containing package of a module file, as a dotted path
-    (…/hcs_sg_iac/usecases/x.py -> hcs_sg_iac.usecases)."""
+    (…/hcs_sg_iac/adapters/x.py -> hcs_sg_iac.adapters)."""
     parts = path.relative_to(PKG.parent).with_suffix("").parts
     return ".".join(parts[:-1])
 

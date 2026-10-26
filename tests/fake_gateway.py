@@ -1,6 +1,7 @@
-# hcs_sg_iac/adapters/fake_gateway.py
-"""In-memory gateway. Implements every protocol; powers fast tests,
-CLI e2e and the contract suite. call_log records every write."""
+# tests/fake_gateway.py
+"""The in-memory gateway test double: implements every protocol the
+prod package defines, powers the e2e CLI tests (planning AND writes).
+call_log records every write; seed() in conftest fills it."""
 
 import logging
 

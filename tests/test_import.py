@@ -3,19 +3,20 @@
 remotes become honest deletes, duplicate names, unset remote."""
 
 from hcs_sg_iac.adapters import yaml_config
-from hcs_sg_iac.adapters.fake_gateway import FakeGateway
-from hcs_sg_iac.usecases import importer, pipeline
 
 from tests.conftest import cloud_rule, make_project, seed
+from tests.fake_gateway import FakeGateway
 
 
 def _write_and_plan(tmp_path, gw):
-    imp = importer.import_snapshot(gw.inventory().snapshot)
+    imp = yaml_config.import_snapshot(gw.inventory().snapshot)
     files = {}
     for n, g in imp.groups.items():
         files.update(yaml_config.dump_security_group_dir(g, imp.rules.get(n)))
     root = make_project(tmp_path, files)
-    al, errors = pipeline.plan_project(yaml_config.load_project, gw, root)
+    from hcs_sg_iac.cli.main import _plan_project
+
+    al, errors = _plan_project(gw, root)
     assert al is not None, errors
     return imp, al
 
@@ -86,7 +87,7 @@ def test_duplicate_cloud_names_first_id_wins(tmp_path):
         FakeGateway(),
         sgs=(("sg-a", "dup", ""), ("sg-b", "dup", ""), ("sg-c", "app", "")),
     )
-    imp = importer.import_snapshot(gw.inventory().snapshot)
+    imp = yaml_config.import_snapshot(gw.inventory().snapshot)
     assert sorted(imp.groups) == ["app", "dup"]
     assert any("duplicate cloud name" in n and "sg-b" in n for n in imp.notes)
 

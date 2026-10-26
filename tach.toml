@@ -7,7 +7,7 @@
 exclude = ["**/__pycache__", ".venv", "tests"]
 source_roots = ["."]
 
-# ---- vocabulary leaves ----
+# ---- vocabulary + brain leaves ----
 [[modules]]
 path = "hcs_sg_iac.entities"
 depends_on = []
@@ -20,15 +20,11 @@ depends_on = ["hcs_sg_iac.entities"]
 path = "hcs_sg_iac.contracts"
 depends_on = ["hcs_sg_iac.entities", "hcs_sg_iac.snapshot"]
 
-# ---- rings ----
 [[modules]]
-path = "hcs_sg_iac.usecases"
-depends_on = [
-    "hcs_sg_iac.entities",
-    "hcs_sg_iac.snapshot",
-    "hcs_sg_iac.contracts",
-]
+path = "hcs_sg_iac.engine"
+depends_on = ["hcs_sg_iac.entities", "hcs_sg_iac.snapshot", "hcs_sg_iac.contracts"]
 
+# ---- rings ----
 [[modules]]
 path = "hcs_sg_iac.adapters"
 depends_on = [
@@ -40,8 +36,9 @@ depends_on = [
 [[modules]]
 path = "hcs_sg_iac.cli"
 depends_on = [
+    "hcs_sg_iac.entities",
     "hcs_sg_iac.contracts",
     "hcs_sg_iac.snapshot",
-    "hcs_sg_iac.usecases",
+    "hcs_sg_iac.engine",
     "hcs_sg_iac.adapters",
 ]

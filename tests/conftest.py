@@ -3,11 +3,11 @@
 a seeded FakeGateway, and the run() harness every CLI scenario uses."""
 
 import pytest
-from hcs_sg_iac.adapters.fake_gateway import FakeGateway
 from hcs_sg_iac.cli.main import main
+from hcs_sg_iac.engine import plan, resolve_memberships
 from hcs_sg_iac.snapshot import CloudNic, CloudRule, CloudSg
-from hcs_sg_iac.usecases.plan import plan, read_snapshot
-from hcs_sg_iac.usecases.resolve import resolve_memberships
+
+from tests.fake_gateway import FakeGateway
 
 GROUP_YAML = "name: web\ndescription: web\nmembers:\n  - ip: 10.0.1.10\n"
 INGRESS_YAML = "- {source: 203.0.113.0/24, protocol: tcp, ports: '22'}\n"
@@ -82,9 +82,10 @@ def write_snapshot(
 
 
 def plan_state(gw, state):
-    res = resolve_memberships(gw, state)
+    inv = gw.inventory()
+    res = resolve_memberships(inv.nics_by_ip, state)
     assert res.report.ok, res.report.errors
-    return plan(state, res, read_snapshot(gw))
+    return plan(state, res, inv.snapshot)
 
 
 @pytest.fixture
