@@ -86,12 +86,6 @@ for the reason and re-review trigger). First trivy run downloads the
 vulnerability DB; the air-gapped RHEL box needs the offline DB (trivy
 docs: "Air-Gapped Environment") or simply runs the scan elsewhere.
 
-Real-cloud contract tests (fake always, real gated on credentials):
-
-    HCS_AK=... .venv/bin/python -m pytest tests/test_gateway_contract.py
-    # member bind/unbind on the real cloud additionally needs
-    # HCS_CONTRACT_PORT=<id of a spare test port>
-
 ## Architecture
 
 Clean rings, one rule: imports point inward; inner rings never know
@@ -111,9 +105,7 @@ an unregistered adapter file FAILS). The cloud boundary is TWO
 Protocols (model/gateway.py): CloudReader (inventory() is the single
 read seam + find_nics_by_ip) and CloudWriter. Three interchangeable
 gateways implement them — huawei (SDK), fake (in-memory, powers every
-test), snapshot replay (offline planning) — and the contract suite
-runs the same exercise against fake and real so the fake cannot drift
-from reality unnoticed. Desired state (`Group`/`Rule`) vs observed
+test), snapshot replay (offline planning). Desired state (`Group`/`Rule`) vs observed
 (`CloudSg`/`CloudRule`) join on identity tuples
 `(direction, protocol, ports, remote)`; plan output is ONE ActionList
 carrying both display rows and executable payloads.

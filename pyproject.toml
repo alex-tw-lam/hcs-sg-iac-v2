@@ -46,4 +46,3 @@ check_untyped_defs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers"]
-markers = ["cloud_contract: needs real HCS credentials (HCS_AK/HCS_SK set)"]
