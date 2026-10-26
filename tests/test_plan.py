@@ -259,7 +259,9 @@ def test_description_drift_plans_update(tmp_path):
     assert [(a.sign, a.type) for a in al.actions] == [("~", "group")]
 
 
-def test_cloud_only_group_is_inventoried(tmp_path):
+def test_cloud_only_group_is_planned_for_deletion(tmp_path):
+    """A cloud SG with no directory is no longer 'inventoried' — the
+    directory's absence IS the delete instruction."""
     make_project(
         tmp_path,
         {"security-groups/web/group.yaml": "name: web\nmembers: []\n"},
@@ -268,11 +270,11 @@ def test_cloud_only_group_is_inventoried(tmp_path):
         FakeGateway(), sgs=(("sg-web", "web", ""), ("sg-x", "extra", ""))
     )
     al = plan_state(gw, _state(tmp_path))
-    assert al.actions == ()
-    assert any(
-        "'extra'" in u and "no security-groups/extra/" in u
-        for u in al.unmanaged
-    )
+    assert [(a.sign, a.type, a.group) for a in al.actions] == [
+        ("-", "group", "extra")
+    ]
+    assert al.actions[0].op.sg_id == "sg-x"
+    assert not any("extra" in u for u in al.unmanaged)
 
 
 def test_extra_cloud_member_is_detached(tmp_path):
@@ -292,3 +294,50 @@ def test_extra_cloud_member_is_detached(tmp_path):
     assert [(a.sign, a.type, a.cloud_id) for a in al.actions] == [
         ("-", "member", "p1")
     ]
+
+
+# ---- deleting a group = removing its directory ----
+
+
+def test_absent_directory_plans_group_deletion(tmp_path):
+    """web is in the cloud but its directory is gone: one delete action
+    (db's create is its own row), no unmanaged note for web anymore."""
+    make_project(
+        tmp_path, {"security-groups/db/group.yaml": "name: db\nmembers: []\n"}
+    )
+    gw = seed(FakeGateway(), sgs=(("sg-1", "web", "web"),))
+    al = plan_state(gw, _state(tmp_path))
+    web = [a for a in al.actions if a.group == "web"]
+    assert [(a.sign, a.type) for a in web] == [("-", "group")]
+    assert web[0].op.sg_id == "sg-1"
+    assert not any("web" in u for u in al.unmanaged)
+
+
+def test_absent_directory_detaches_members_before_delete(tmp_path):
+    make_project(
+        tmp_path, {"security-groups/db/group.yaml": "name: db\nmembers: []\n"}
+    )
+    gw = seed(
+        FakeGateway(),
+        sgs=(("sg-1", "web", "web"),),
+        nics=(("10.0.1.10", "p1"),),
+        attached=(("sg-1", "p1"),),
+    )
+    al = plan_state(gw, _state(tmp_path))
+    web = [a for a in al.actions if a.group == "web"]
+    assert [(a.sign, a.type) for a in web] == [
+        ("-", "member"),
+        ("-", "group"),
+    ]
+
+
+def test_empty_groups_refuses_whole_estate_deletion(tmp_path):
+    """security-groups/ present but empty, cloud non-empty: refuse."""
+    (tmp_path / "security-groups").mkdir()
+    gw = seed(FakeGateway(), sgs=(("sg-1", "web", "web"),))
+    from hcs_sg_iac.usecases import pipeline
+
+    al, errors = pipeline.plan_project(
+        yaml_config.load_project, gw, tmp_path
+    )
+    assert al is None and any("refusing" in e for e in errors)

@@ -3,6 +3,7 @@
 rc/stdout/stderr against main() with a seeded FakeGateway."""
 
 import json
+import shutil
 
 import pytest
 from hcs_sg_iac.adapters.fake_gateway import FakeGateway
@@ -80,16 +81,30 @@ def test_apply_partial_failure_rc1(project, capsys, monkeypatch):
     assert rc == 1 and "failed" in out
 
 
-def test_destroy_dry_run(project, capsys, monkeypatch):
-    gw = seed(FakeGateway(), sgs=(("sg-1", "web", "web"),))
-    rc, out, _ = run(
-        ["destroy", "web", P, str(project)], gw, capsys, monkeypatch
+def _remove_web_group(project):
+    """Deleting a group = removing its security-groups/<name>/
+    directory. A second group (db) keeps security-groups/ non-empty so
+    the whole-estate guard stays quiet — these tests are about ONE
+    deletion."""
+    make_project(
+        project, {"security-groups/db/group.yaml": "name: db\nmembers: []\n"}
     )
+    shutil.rmtree(project / "security-groups" / "web")
+
+
+def test_removed_directory_plans_deletion(project, capsys, monkeypatch):
+    _remove_web_group(project)
+    gw = seed(FakeGateway(), sgs=(("sg-1", "web", "web"),))
+    rc, out, _ = run(["plan", P, str(project)], gw, capsys, monkeypatch)
     assert rc == 0 and "delete security group" in out
-    assert gw.call_log == []
+    assert "1 to destroy" in out
+    assert gw.call_log == []  # a plan never writes
 
 
-def test_destroy_yes_detaches_then_deletes(project, capsys, monkeypatch):
+def test_apply_yes_on_removed_directory_detaches_then_deletes(
+    project, capsys, monkeypatch
+):
+    _remove_web_group(project)
     gw = seed(
         FakeGateway(),
         sgs=(("sg-1", "web", "web"),),
@@ -97,7 +112,7 @@ def test_destroy_yes_detaches_then_deletes(project, capsys, monkeypatch):
         attached=(("sg-1", "p1"),),
     )
     rc, _, _ = run(
-        ["destroy", "web", "--yes", P, str(project)], gw, capsys, monkeypatch
+        ["apply", "--yes", P, str(project)], gw, capsys, monkeypatch
     )
     assert rc == 0
     assert gw.call_log.index("detach:p1->sg-1") < gw.call_log.index(
@@ -232,7 +247,8 @@ def test_apply_snapshot_pair_writes_and_notes_stale(
     assert "snapshot.json is now stale" in err
 
 
-def test_destroy_preview_precedes_writes(project, capsys, monkeypatch):
+def test_deletion_preview_precedes_writes(project, capsys, monkeypatch):
+    _remove_web_group(project)
     gw = seed(
         FakeGateway(),
         sgs=(("sg-1", "web", "web"),),
@@ -240,7 +256,7 @@ def test_destroy_preview_precedes_writes(project, capsys, monkeypatch):
         attached=(("sg-1", "p1"),),
     )
     rc, out, _ = run(
-        ["destroy", "web", "--yes", P, str(project)], gw, capsys, monkeypatch
+        ["apply", "--yes", P, str(project)], gw, capsys, monkeypatch
     )
     assert rc == 0
     assert out.index("2 to destroy") < out.index("Apply complete")

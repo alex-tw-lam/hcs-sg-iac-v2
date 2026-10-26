@@ -41,13 +41,6 @@ def plan_project(load_project, gateway: "CloudReader", project):
         return None, [f"error: {e}"]
 
 
-def plan_destroy_project(gateway: "CloudReader", name: str) -> ActionList:
-    """Whole-SG teardown plan; the ActionList is empty when no cloud SG
-    has that name (the caller decides how to report it). CloudError
-    propagates — the CLI reports it cleanly."""
-    return plan_uc.plan_destroy(name, plan_uc.read_snapshot(gateway))
-
-
 def execute_confirmed(gateway: "CloudGateway", al: ActionList) -> list:
     """The execute flow after a confirmed plan (--yes IS the consent)."""
     _log.info(

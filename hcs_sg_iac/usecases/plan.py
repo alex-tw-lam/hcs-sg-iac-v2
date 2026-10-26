@@ -1,7 +1,11 @@
 # hcs_sg_iac/usecases/plan.py
 """The plan engine (pure): desired state + snapshot → ActionList.
 No state file: security groups are matched by name; the member IP list
-is the truth for membership.
+is the truth for membership. Deleting a group = removing its
+security-groups/<name>/ directory — the plan detaches its members,
+then deletes the SG (the same road additions travel; the API refuses
+an SG with ports). An empty groups/ against a non-empty cloud refuses
+to plan at all (the whole-estate guard).
 
 New groups: their CreateRule/AttachNic payloads carry sg_id="" — apply
 substitutes the id of the SG it just created for that group name."""
@@ -269,6 +273,37 @@ def _plan_rules(
         )
 
 
+def _plan_absent_groups(state: DesiredState, snapshot: Snapshot, actions):
+    """Cloud SGs whose security-groups/<name>/ directory is gone: the
+    directory's absence IS the delete instruction — detach the members
+    first (the API refuses an SG with ports), then delete the SG. Rules
+    go implicitly with the SG cascade."""
+    for sg in snapshot.sgs:
+        if sg.name in state.groups:
+            continue
+        for n in snapshot.attached[sg.id]:
+            actions.append(
+                Action(
+                    "-",
+                    "member",
+                    sg.name,
+                    f"ip {n.ip or n.port_id}",
+                    cloud_id=n.port_id,
+                    op=DetachNic(sg_id=sg.id, port_id=n.port_id),
+                )
+            )
+        actions.append(
+            Action(
+                "-",
+                "group",
+                sg.name,
+                "delete security group (directory removed)",
+                cloud_id=sg.id,
+                op=DeleteSg(sg_id=sg.id),
+            )
+        )
+
+
 def plan(
     state: DesiredState, resolution: Resolution, snapshot: Snapshot
 ) -> ActionList:
@@ -278,12 +313,13 @@ def plan(
     id_to_name = {sg.id: sg.name for sg in snapshot.sgs}
     name_to_sg = _name_to_sg(snapshot)
 
-    for sg in snapshot.sgs:
-        if sg.name not in state.groups:
-            unmanaged.append(
-                f"security group '{sg.name}' "
-                f"(no security-groups/{sg.name}/)"
-            )
+    if not state.groups and snapshot.sgs:
+        raise ValueError(
+            f"security-groups/ is empty but the cloud holds "
+            f"{len(snapshot.sgs)} security group(s) — refusing to plan "
+            f"the deletion of the whole estate"
+        )
+    _plan_absent_groups(state, snapshot, actions)
 
     for gname in sorted(state.groups):
         group = state.groups[gname]
@@ -307,34 +343,3 @@ def plan(
         overlap=resolution.overlaps,
         clears=tuple(sorted(clears)),
     )
-
-
-def plan_destroy(name: str, snapshot: Snapshot) -> ActionList:
-    """Explicit whole-SG deletion: detach everything, then delete the SG.
-    Rules are deleted implicitly by the SG cascade — no per-rule ops and
-    no per-rule quota cost."""
-    sg = next((s for s in snapshot.sgs if s.name == name), None)
-    if sg is None:
-        return ActionList(actions=(), unmanaged=(), overlap=())
-    actions = [
-        Action(
-            "-",
-            "member",
-            name,
-            f"ip {n.ip or n.port_id}",
-            cloud_id=n.port_id,
-            op=DetachNic(sg_id=sg.id, port_id=n.port_id),
-        )
-        for n in snapshot.attached.get(sg.id, [])
-    ]
-    actions.append(
-        Action(
-            "-",
-            "group",
-            name,
-            "delete security group",
-            cloud_id=sg.id,
-            op=DeleteSg(sg_id=sg.id),
-        )
-    )
-    return ActionList(actions=tuple(actions), unmanaged=(), overlap=())

@@ -109,12 +109,6 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common, snap, yesp],
         help="apply changes (dry run unless --yes)",
     )
-    dp = sub.add_parser(
-        "destroy",
-        parents=[common, snap, yesp],
-        help="delete one security group and detach its members",
-    )
-    dp.add_argument("name")
     snp = sub.add_parser(
         "snapshot",
         parents=[common],
@@ -210,9 +204,9 @@ def _snapshot_stale_note(snap_arg) -> None:
 
 
 def _commit(ctx, al, args) -> int:
-    """Shared write tail for apply --yes and destroy --yes: preview
-    first, then execute (--yes IS the consent; --json stdout stays
-    pure), the end-of-run table, and the snapshot staleness note."""
+    """The write tail for apply --yes: preview first, then execute
+    (--yes IS the consent; --json stdout stays pure), the end-of-run
+    table, and the snapshot staleness note."""
     _print_preview(al, args)
     results = pipeline.execute_confirmed(ctx.gateway, al)
     _print_plan(al, args=args, executed=results)
@@ -255,7 +249,7 @@ def _resolve_ctx(args, project, gateway) -> "tuple[_Ctx, int | None]":
     else:  # snapshot.json present -> plan from it, no flag needed
         default = project / "snapshot.json"
         if (
-            args.command in ("plan", "apply", "destroy", "drift")
+            args.command in ("plan", "apply", "drift")
             and default.exists()
         ):
             snap_file, auto = default, True
@@ -263,9 +257,8 @@ def _resolve_ctx(args, project, gateway) -> "tuple[_Ctx, int | None]":
     offline = snap_file is not None and args.command in (
         "plan",
         "apply",
-        "destroy",
     )
-    writing = args.command in ("apply", "destroy") and yes
+    writing = args.command == "apply" and yes
     if gateway is None and (
         args.command in ("snapshot", "drift") or writing or not offline
     ):
@@ -431,22 +424,6 @@ def _cmd_snapshot(args, ctx: _Ctx) -> int:
     return 0
 
 
-def _cmd_destroy(args, ctx: _Ctx) -> int:
-    if ctx.readers is None:  # _resolve_ctx guarantees it for destroy
-        return 1
-    al = pipeline.plan_destroy_project(ctx.readers, args.name)
-    if not al.actions:
-        print(
-            f"error: no cloud security group named {args.name!r}",
-            file=sys.stderr,
-        )
-        return 1
-    if not ctx.yes:
-        _print_plan(al, args=args)
-        return 0
-    return _commit(ctx, al, args)
-
-
 def _cmd_plan_apply(args, ctx: _Ctx) -> int:
     if ctx.readers is None:  # _resolve_ctx guarantees it for plan/apply
         return 1
@@ -483,7 +460,6 @@ def main(argv=None, gateway=None) -> int:
         handlers = {
             "drift": _cmd_drift,
             "snapshot": _cmd_snapshot,
-            "destroy": _cmd_destroy,
             "plan": _cmd_plan_apply,
             "apply": _cmd_plan_apply,
         }

@@ -15,13 +15,12 @@ Credentials come from the environment only — never from files or flags.
 
     hcs-sg plan                         # diff code vs cloud (read-only)
     hcs-sg apply [--yes]                # dry run unless --yes
-    hcs-sg destroy NAME [--yes]         # detach members, delete the SG
     hcs-sg snapshot [--out FILE]        # whole cloud -> snapshot.json
     hcs-sg drift [--snapshot FILE]      # live cloud vs the file (rc 1 on drift)
     hcs-sg import [--force]             # snapshot -> security-groups/ YAML
 
 Shared flags sit after the verb: `--project DIR --json --verbose
---snapshot FILE` (+ `--yes` on apply/destroy).
+--snapshot FILE` (+ `--yes` on apply).
 
 ## Project files
 
@@ -37,7 +36,10 @@ Protocol: tcp|udp|icmp|icmpv6|all. Ports: `"80"`, `"22,443"`,
 `"8000-9000"` (merged, max 20 entries). An absent direction file =
 UNMANAGED (the tool never touches those cloud rules; `plan` lists them
 under NOT MANAGED); `[]` = managed remove-all (flagged with a WARNING
-line). The self-referential rules HCS adds on SG create are preserved —
+line). **Deleting a group = removing its directory** — the plan
+detaches its members and deletes the SG, `apply --yes` executes it;
+an EMPTY `security-groups/` against a non-empty cloud refuses to plan
+(the whole-estate guard). The self-referential rules HCS adds on SG create are preserved —
 never converged away, not even by `[]`; a coded self-reference matches
 them instead of duplicating. Multi-environment repos conventionally use
 `projects/<env>/` siblings (`--project projects/dev`).
@@ -46,7 +48,7 @@ them instead of duplicating. Multi-environment repos conventionally use
 
 `snapshot` takes the WHOLE estate in 2 paged calls (SGs with embedded
 rules + one unfiltered port list). With `snapshot.json` present,
-plan/apply/destroy run their pre-work fully OFFLINE — zero reads, no
+plan/apply run their pre-work fully OFFLINE — zero reads, no
 credentials — and `apply --yes` still writes live. After a write run
 the snapshot is deliberately NOT auto-updated: the CLI notes staleness;
 refresh with `snapshot` or verify with `drift` (keyed by cloud IDs, so
@@ -68,7 +70,9 @@ overwrite existing files without `--force`; delete a file to unmanage.
   ignored now.)
 - Member identity is the IP list; resolution fails clean on zero or
   multi-match before any write.
-- Whole-group deletion only via explicit `destroy NAME --yes`.
+- Whole-group deletion = removing the group's directory; members
+  detach first (the API refuses an SG with ports), then the SG goes —
+  previewed like every write, gated by `--yes`.
 
 ## Checks & tests
 
