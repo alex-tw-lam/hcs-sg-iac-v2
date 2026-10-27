@@ -66,16 +66,6 @@ class FakeGateway:
         return rules
 
     # -- membership --
-    def find_nics_by_ip(self, ips: list) -> dict:
-        found = {ip: [n for n in self._nics if n.ip == ip] for ip in ips}
-        self._trace("find_nics_by_ip")
-        return found
-
-    def list_attached_nics(self, sg_id: str) -> list:
-        nics = [n for n in self._nics if (sg_id, n.port_id) in self._attached]
-        self._trace("list_attached_nics")
-        return nics
-
     def inventory(self) -> Inventory:
         """In-memory fast path — parity with HuaweiGateway.inventory so
         the contract suite cross-checks the same seam on both."""

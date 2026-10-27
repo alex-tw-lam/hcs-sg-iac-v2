@@ -79,8 +79,8 @@ class Snapshot(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _key_every_sg(cls, d):
-        """The invariant the readers used to maintain with per-adapter
-        normalisation loops: EVERY sg id is keyed in rules/attached (an
+        """The load-bearing invariant: EVERY sg id is keyed in
+        rules/attached (an
         empty list when there is nothing) — so .get(id, []) and [id]
         are both safe downstream."""
         if not isinstance(d, dict):

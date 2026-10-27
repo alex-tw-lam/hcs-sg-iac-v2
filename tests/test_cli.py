@@ -274,14 +274,7 @@ def test_drift_clean_rc0_and_json_envelope(project, capsys, monkeypatch):
     )
     data = json.loads(out)  # one pure JSON doc
     assert rc == 0
-    assert {
-        "created",
-        "reference",
-        "target",
-        "missingObjects",
-        "unexpectedObjects",
-        "changedObjects",
-    } == set(data["diff"])
+    assert {"reference", "missing", "unexpected", "changed"} == set(data)
 
 
 def test_import_force_overwrites_and_json_lists(tmp_path, capsys, monkeypatch):
@@ -300,14 +293,12 @@ def test_import_force_overwrites_and_json_lists(tmp_path, capsys, monkeypatch):
         in (project / "security-groups" / "web" / "group.yaml").read_text()
     )
     rc, out, _ = run(
-        ["import", "--json", "--force", P, str(project)],
+        ["import", "--force", P, str(project)],
         None,
         capsys,
         monkeypatch,
     )
-    data = json.loads(out)
-    assert rc == 0
-    assert {"imported", "rules", "files", "notes"} == set(data)
+    assert rc == 0 and "import:" in out
 
 
 def test_plan_uses_snapshot_flag_not_just_autodetect(

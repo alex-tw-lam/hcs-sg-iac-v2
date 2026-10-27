@@ -33,7 +33,6 @@ from huaweicloudsdkvpc.v2 import (
     NeutronCreateSecurityGroupRuleRequest,
     NeutronCreateSecurityGroupRuleRequestBody,
     NeutronDeleteSecurityGroupRuleRequest,
-    NeutronListSecurityGroupRulesRequest,
     NeutronListSecurityGroupsRequest,
     NeutronSecurityGroupRule,
     NeutronUpdateSecurityGroupOption,
@@ -73,7 +72,6 @@ _log = logging.getLogger(__name__)  # --verbose: wired by the CLI
 # slots on large estates; these are the sane defaults for an HCS
 # private-cloud scale.
 _SG_PAGE = 200
-_RULE_PAGE = 500
 _PORT_PAGE = 200
 
 # Client-method dispatch: request class name → VpcClient method name.
@@ -91,7 +89,6 @@ _METHODS = {
     "NeutronListSecurityGroupsRequest": "neutron_list_security_groups",
     "NeutronUpdateSecurityGroupRequest": "neutron_update_security_group",
     "DeleteSecurityGroupRequest": "delete_security_group",
-    "NeutronListSecurityGroupRulesRequest": "neutron_list_security_group_rules",
     "NeutronCreateSecurityGroupRuleRequest": "neutron_create_security_group_rule",
     "NeutronDeleteSecurityGroupRuleRequest": "neutron_delete_security_group_rule",
     "ListPortsRequest": "list_ports",
@@ -193,8 +190,8 @@ class HuaweiGateway:
                 return out
             marker = page[-1].id
 
-    # -- reads (inventory is THE seam; per-SG readers
-    # stay for the contract suite's cross-check) --
+    # -- reads (inventory is the whole read path; the remote-group
+    # cache fills from its pages) --
     def list_security_groups(self) -> list:
         def to_sg(sg):
             self._sg_name_to_id[sg.name] = sg.id
@@ -209,16 +206,6 @@ class HuaweiGateway:
             "security_groups",
             _SG_PAGE,
             to_sg,
-        )
-
-    def list_rules(self, sg_id: str) -> list:
-        return self._paged(
-            lambda marker: NeutronListSecurityGroupRulesRequest(
-                security_group_id=sg_id, limit=_RULE_PAGE, marker=marker
-            ),
-            "security_group_rules",
-            _RULE_PAGE,
-            self._to_cloud_rule,
         )
 
     def inventory(self) -> Inventory:
@@ -272,49 +259,6 @@ class HuaweiGateway:
         return Inventory(
             snapshot=Snapshot(sgs=tuple(sgs), rules=rules, attached=attached),
             nics_by_ip=nics_by_ip,
-        )
-
-    # -- membership --
-    def find_nics_by_ip(self, ips: list) -> dict:
-        # No marker loop here on purpose: each chunk's result set is
-        # bounded by construction — the response can only contain ports
-        # whose IP is one of the (at most 100) queried addresses — so a
-        # single request per chunk is complete in practice.
-        found: dict = {ip: [] for ip in ips}
-        for i in range(0, len(ips), 100):  # URL-length safety chunks
-            chunk = ips[i : i + 100]  # fixed_ips is 'multi': one
-            resp = self._run(
-                ListPortsRequest(  # repeated param per ip
-                    fixed_ips=[f"ip_address={ip}" for ip in chunk]
-                )
-            )
-            for p in resp.ports or []:
-                for fip in p.fixed_ips or []:
-                    if fip.ip_address in found:
-                        found[fip.ip_address].append(
-                            CloudNic(
-                                port_id=p.id,
-                                ip=fip.ip_address,
-                                vm_name=_vm_name(p),
-                            )
-                        )
-        return found
-
-    def list_attached_nics(self, sg_id: str) -> list:
-        def to_nic(p):
-            return CloudNic(
-                port_id=p.id,
-                ip=p.fixed_ips[0].ip_address if p.fixed_ips else "",
-                vm_name=_vm_name(p),
-            )
-
-        return self._paged(
-            lambda marker: ListPortsRequest(
-                security_groups=[sg_id], limit=_PORT_PAGE, marker=marker
-            ),
-            "ports",
-            _PORT_PAGE,
-            to_nic,
         )
 
     # -- writers --

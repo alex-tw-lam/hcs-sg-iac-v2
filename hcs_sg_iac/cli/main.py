@@ -51,9 +51,7 @@ class _ReadOnlyPlanParser(argparse.ArgumentParser):
     subparser unrecognized-arg errors funnel here."""
 
     def error(self, message):
-        if "unrecognized" in message and (
-            "--execute" in message or "--yes" in message
-        ):
+        if "unrecognized" in message and "--yes" in message:
             self.exit(
                 2,
                 f"{self.prog}: read-only — use "
@@ -110,16 +108,11 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common, snap, yesp],
         help="apply changes (dry run unless --yes)",
     )
-    snp = sub.add_parser(
+    sub.add_parser(
         "snapshot",
         parents=[common],
         help="export the cloud inventory (SGs, members, "
         "rules, member NICs) to a JSON file",
-    )
-    snp.add_argument(
-        "--out",
-        default="snapshot.json",
-        help="output file inside the project " "(default: snapshot.json)",
     )
     sub.add_parser(
         "drift",
@@ -237,7 +230,7 @@ class _Ctx:
 def _resolve_ctx(args, project, gateway) -> "tuple[_Ctx, int | None]":
     """Snapshot provenance + gateway/credentials gate for the cloud
     commands. Returns (ctx, None) to proceed, or (ctx, rc) to exit with
-    rc: plan/apply/destroy may run their pre-work OFFLINE from a
+    rc: plan/apply may run their pre-work OFFLINE from a
     snapshot file (zero reads, no credentials); live reads
     (snapshot/drift), online planning and --yes writes need the real
     gateway. Flags live on their own subparsers, so read them
@@ -349,19 +342,6 @@ def _cmd_import(args, project) -> int:
     n_rules = sum(
         len(rf.ingress) + len(rf.egress) for rf in imported.rules.values()
     )
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "imported": sorted(imported.groups),
-                    "rules": n_rules,
-                    "files": sorted(writes),
-                    "notes": list(imported.notes),
-                },
-                indent=2,
-            )
-        )
-        return 0
     print(
         f"import: {len(imported.groups)} groups, {n_rules} rules -> "
         f"{len(writes)} files under {project}"
@@ -413,12 +393,19 @@ def _cmd_drift(args, ctx: _Ctx) -> int:
 
 
 def _cmd_snapshot(args, ctx: _Ctx) -> int:
+    if args.json:
+        print(
+            "error: snapshot has no --json output — the file IS the "
+            "output",
+            file=sys.stderr,
+        )
+        return 2
     _log.info("phase: snapshotting the cloud")
     if ctx.gateway is None:  # _resolve_ctx guarantees it for snapshot
         return 1
     inv = ctx.gateway.inventory()  # the whole cloud, 2 calls
     snap, nics_by_ip = inv.snapshot, inv.nics_by_ip
-    path = ctx.project / args.out
+    path = ctx.project / "snapshot.json"
     path.write_text(
         snapshot_to_json(snap.sgs, snap.rules, snap.attached, nics_by_ip),
         encoding="utf-8",
@@ -434,8 +421,7 @@ def _cmd_snapshot(args, ctx: _Ctx) -> int:
 
 
 def _plan_project(ctx: _Ctx):
-    """Load → resolve → plan, the workflow the old pipeline module
-    owned. The observed state: the offline inventory when present,
+    """Load → resolve → plan. The observed state: the offline inventory when present,
     else ONE live read. Returns (ActionList, []) on success or (None,
     error lines); engine errors (duplicate cloud names, the
     whole-estate guard) surface as clean lines, never tracebacks."""

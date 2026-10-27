@@ -3,7 +3,6 @@
 member→nic=, group→sg=, rule→rule=; "+ rule" rows without a cloud id
 print (new)."""
 
-import datetime
 import json
 
 _PREFIX = {"member": "nic=", "group": "sg=", "rule": "rule="}
@@ -88,8 +87,6 @@ def render_json(al, executed=None) -> str:
             for a in al.actions
         ],
         "summary": al.summary(),
-        "quota": None,  # the local budget limiter is gone; key kept for
-        # --json shape compatibility
         "unmanaged": list(al.unmanaged),
         "overlap": list(al.overlap),
     }
@@ -139,15 +136,11 @@ def render_drift_lines(result: dict) -> tuple:
 
 
 def render_drift_json(result: dict, reference_file: str) -> dict:
-    """The complete Liquibase-diff envelope (the --json document body):
-    the whole wire shape lives in THIS ring, not split with the CLI."""
+    """The `drift --json` document: the diff plus where it was
+    measured against."""
     return {
-        "diff": {
-            "created": datetime.datetime.now(datetime.UTC).isoformat(),
-            "reference": {"kind": "snapshot", "file": reference_file},
-            "target": {"kind": "cloud"},
-            "missingObjects": result["missing"],
-            "unexpectedObjects": result["unexpected"],
-            "changedObjects": result["changed"],
-        }
+        "reference": reference_file,
+        "missing": result["missing"],
+        "unexpected": result["unexpected"],
+        "changed": result["changed"],
     }

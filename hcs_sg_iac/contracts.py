@@ -1,15 +1,17 @@
 # hcs_sg_iac/contracts.py
-"""The cloud boundary: two Protocols + the domain error. The read side
-is one call — inventory() returns the whole observed cloud in a single
-pass, plus a member-IP lookup. The write side is separate: apply
-additionally needs the writers. Any object implementing these (the
-real SDK gateway, the in-memory test fake) can stand in for any
-other."""
+"""The cloud boundary. `CloudGateway` is a typing.Protocol — an
+interface written the Python way: any class with these exact methods
+counts as a gateway, no inheritance needed (the `...` bodies are how
+Protocol methods are declared; nothing is unfinished). The real
+gateway (adapters/huawei_gateway) and the test fake
+(tests/fake_gateway) both match it, so tests run through the same
+calls production does. CloudError is the one error type that escapes
+a gateway: one clean line, never a traceback."""
 
 from typing import Protocol
 
 from hcs_sg_iac.entities import Rule
-from hcs_sg_iac.snapshot import CloudNic, CloudRule, CloudSg
+from hcs_sg_iac.snapshot import CloudRule, CloudSg
 
 
 class CloudError(Exception):
@@ -17,12 +19,11 @@ class CloudError(Exception):
     traceback)."""
 
 
-class CloudReader(Protocol):
+class CloudGateway(Protocol):
+    """Everything the CLI needs from a cloud: one whole-estate read
+    (inventory) plus the eight writes apply performs."""
+
     def inventory(self): ...
-    def find_nics_by_ip(self, ips: list) -> "dict[str, list[CloudNic]]": ...
-
-
-class CloudWriter(Protocol):
     def create_security_group(
         self, name: str, description: str
     ) -> CloudSg: ...
@@ -34,8 +35,3 @@ class CloudWriter(Protocol):
     def delete_rule(self, rule_id: str) -> None: ...
     def attach_nic(self, sg_id: str, port_id: str) -> None: ...
     def detach_nic(self, sg_id: str, port_id: str) -> None: ...
-
-
-class CloudGateway(CloudReader, CloudWriter, Protocol):
-    """What the CLI hands its handlers: one object filling both seams
-    (the real SDK gateway, the in-memory fake)."""

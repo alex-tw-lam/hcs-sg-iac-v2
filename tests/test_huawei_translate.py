@@ -185,35 +185,6 @@ def test_pagination_follows_marker_one_endpoint():
     assert len(calls) == 2  # full page advanced the marker
 
 
-def test_find_nics_by_ip_filters_and_chunks():
-    ports = [
-        SimpleNamespace(
-            id=f"p{i}",
-            fixed_ips=[SimpleNamespace(ip_address=f"10.0.0.{i}")],
-            dns_assignment=[],
-        )
-        for i in range(1, 4)
-    ]
-    requests = []
-
-    def handler(req):
-        requests.append([f.split("=")[1] for f in req.fixed_ips])
-        return SimpleNamespace(
-            ports=[
-                p
-                for p in ports
-                if f"ip_address={p.fixed_ips[0].ip_address}" in req.fixed_ips
-            ]
-        )
-
-    gw = HuaweiGateway(SimpleNamespace(list_ports=handler))
-    ips = [f"10.0.0.{i}" for i in range(1, 4)] * 40  # 120 -> 2 chunks
-    found = gw.find_nics_by_ip(ips)
-    assert set(found) == set(ips)
-    assert all(len(chunk) <= 100 for chunk in requests)
-    assert sum(len(chunk) for chunk in requests) == 120
-
-
 def test_inventory_whole_cloud_in_two_calls():
     embedded = _wire_rule(
         id="r-1",

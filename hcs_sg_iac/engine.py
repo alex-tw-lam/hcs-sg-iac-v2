@@ -82,10 +82,8 @@ class Action:
     type: 'Literal["member", "rule", "group"]'
     group: str
     detail: str
+    op: "CreateSg | UpdateSg | DeleteSg | AttachNic | DetachNic | CreateRule | DeleteRule"
     cloud_id: str | None = None
-    op: "CreateSg | UpdateSg | DeleteSg | AttachNic | DetachNic | CreateRule | DeleteRule | None" = (
-        None  # payload above; None for display-only rows
-    )
 
 
 @dataclass(frozen=True)
@@ -524,7 +522,7 @@ def execute(action_list: ActionList, *, gateway: "CloudGateway") -> list:
     a failure never aborts the run; dependents of a failed group create
     are skipped, not orphaned."""
     ordered = sorted(
-        (a for a in action_list.actions if a.op is not None),
+        action_list.actions,
         key=lambda a: _ORDER[type(a.op)],
     )
     results: list = []
@@ -568,7 +566,7 @@ def execute(action_list: ActionList, *, gateway: "CloudGateway") -> list:
     return results
 
 
-# ---- drift: two snapshots → a Liquibase-diff-shaped report ----
+# ---- drift: two snapshots → a change report ----
 
 _RULE_FIELDS = (
     "direction",
@@ -586,7 +584,7 @@ def diff_inventory(old: Snapshot, new: Snapshot) -> dict:
     name/sg} and changed ones add {"differences": [{"field",
     "referenceValue", "comparedValue"}]} — keyed by cloud ID throughout,
     so duplicated names never confuse the diff; renames surface as a
-    `name` difference."""
+    `name` difference. `drift --json` prints this dict as-is."""
     missing, unexpected, changed = [], [], []
     old_sgs, new_sgs = {s.id: s for s in old.sgs}, {s.id: s for s in new.sgs}
     for sid in sorted(set(old_sgs) - set(new_sgs)):

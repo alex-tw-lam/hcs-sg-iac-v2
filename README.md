@@ -15,7 +15,7 @@ Credentials come from the environment only — never from files or flags.
 
     hcs-sg plan                         # diff code vs cloud (read-only)
     hcs-sg apply [--yes]                # dry run unless --yes
-    hcs-sg snapshot [--out FILE]        # whole cloud -> snapshot.json
+    hcs-sg snapshot                     # whole cloud -> snapshot.json
     hcs-sg drift [--snapshot FILE]      # live cloud vs the file (rc 1 on drift)
     hcs-sg import [--force]             # snapshot -> security-groups/ YAML
 
@@ -32,7 +32,7 @@ Per-SG directory layout — the directory name IS the group name:
     └── egress.yaml         # list of {destination, protocol, ports}
 
 `source`/`destination` = group name or IPv4 CIDR (bare IP auto-/32).
-Protocol: tcp|udp|icmp|icmpv6|all. Ports: `"80"`, `"22,443"`,
+Protocol: tcp|udp|icmp|all. Ports: `"80"`, `"22,443"`,
 `"8000-9000"` (merged, max 20 entries). An absent direction file =
 UNMANAGED (the tool never touches those cloud rules; `plan` lists them
 under NOT MANAGED); `[]` = managed remove-all (flagged with a WARNING
@@ -52,8 +52,8 @@ plan/apply run their pre-work fully OFFLINE — zero reads, no
 credentials — and `apply --yes` still writes live. After a write run
 the snapshot is deliberately NOT auto-updated: the CLI notes staleness;
 refresh with `snapshot` or verify with `drift` (keyed by cloud IDs, so
-duplicate names never confuse it; `drift --json` is Liquibase-diff
-shaped). `import` adopts the estate from a snapshot (offline): every
+duplicate names never confuse it; `drift --json` prints the plain
+missing/unexpected/changed diff). `import` adopts the estate from a snapshot (offline): every
 unrepresentable thing is skipped WITH a note (bad names, duplicate
 cloud names, IPv6 remotes); a skipped rule becomes an honest stale
 delete on the next plan — the note says so. Import refuses to
@@ -65,9 +65,7 @@ overwrite existing files without `--force`; delete a file to unmanage.
   the consent, there are no prompts.
 - Rate limits: the cloud throttling us (429 / APIGW) is waited out and
   retried in place with a bounded number of attempts — an unattended
-  run finishes instead of stopping. (The old local call-budget limiter
-  and its SERVICE_CALL_BUDGET knob are gone; the setting is simply
-  ignored now.)
+  run finishes instead of stopping.
 - Member identity is the IP list; resolution fails clean on zero or
   multi-match before any write.
 - Whole-group deletion = removing the group's directory; members

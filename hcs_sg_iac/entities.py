@@ -57,7 +57,6 @@ class RemoteCidr(BaseModel):
         return str(net)
 
 
-Remote = RemoteGroup | RemoteCidr
 
 
 def parse_remote(value: str):
@@ -195,8 +194,8 @@ def parse_ports(value, *, field: str = "ports") -> "PortSet | None":
 # ---- the entities ----
 
 GROUP_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-PROTOCOLS = ("tcp", "udp", "icmp", "icmpv6", "all")
-_NO_PORTS_PROTOCOLS = ("icmp", "icmpv6", "all")
+PROTOCOLS = ("tcp", "udp", "icmp", "all")
+_NO_PORTS_PROTOCOLS = ("icmp", "all")
 
 
 class Member(BaseModel):
